@@ -30,10 +30,10 @@ The clock shows the minute rounded down to a multiple of N (10:07 shows 10:05 wi
 ## How it works
 
 - `Scripts/main.lua`: the dependent bootstrap from core's `api-contract.md`, then `connect{ mod = "Clock", need = "0.2.0" }`. In `onReady` it creates one text element, `clock.time`, at `{ host = "hud", corner = "top-right" }`, hidden, and starts a 1,000 ms game-thread loop (`LoopInGameThreadWithDelay`). Each tick reads the time; when the shown value changes it sets the text, then shows the element. With no sky it hides the element and forgets the last value, so a new match shows its time at once. Core keeps the element attached through every HUD rebuild.
-- `Scripts/time.lua`: `read()` finds the live `Ultra_Dynamic_Sky_C`, reads `Time of Day` and converts it with the sky's own `Time Of Day to H/M/S`, the same conversion the Journal map uses. It keeps only the sky's path between calls (re-found with `StaticFindObject`; `FindFirstOf` only when the path stops resolving or after a map change). `format` and `boundary` are pure: zero-padded `HH:MM`, hours past 23 wrap to 00.
+- `Scripts/time.lua`: `read()` finds the live `Ultra_Dynamic_Sky_C`, reads `Time of Day` and converts it in Lua with the sky's own formula (the decompiled `Time Of Day to H/M/S`: `Time % 2400`, `/ 100`, floor for the hour, the fraction × 60, floor for the minute), the conversion the Journal map uses too. Once per sky (each match) it checks that against the Blueprint function itself and logs `VERIFY`; if they ever disagree it uses the function from then on, with one `WARN`. (Calling the function every second cost about 100 µs a tick on V8.1.2; reading the property costs a few.) Between calls it keeps only a core weak handle to the sky and its path; `FindFirstOf` (about 120 µs) runs only when the handle no longer resolves or after a map change. `format` and `boundary` are pure: zero-padded `HH:MM`, hours past 23 wrap to 00.
 - If core is missing, disabled, failed or too old, the log has exactly one `[Clock]` line naming the cause (core's `connect` composes it; the bootstrap writes the "not installed" one) and the clock does nothing else.
 
-Log lines (`UE4SS.log`): `[Clock] CONNECT ok ...`, `[Clock] READY updateEvery=<n> element=clock.time`, `[Clock] VISIBLE <HH:MM>` when the clock appears, `[Clock] HIDDEN no sky` when it goes away, and one `WARN` per distinct read error (the clock hides rather than show a wrong time). With `deploy.ps1 -Test`, `settings.lua` also turns on DEBUG lines: `DEBUG SHOW <HH:MM>` for every shown value and `DEBUG TICK n=60 avg <us> max <us>` for the read-tick cost.
+Log lines (`UE4SS.log`): `[Clock] CONNECT ok ...`, `[Clock] READY updateEvery=<n> element=clock.time`, `[Clock] VERIFY <Time of Day> -> HH:MM, the same as 'Time Of Day to H/M/S'` once per match, `[Clock] VISIBLE <HH:MM>` when the clock appears, `[Clock] HIDDEN no sky` when it goes away, and one `WARN` per distinct read error (the clock hides rather than show a wrong time). With `deploy.ps1 -Test`, `settings.lua` also turns on DEBUG lines: `DEBUG SHOW <HH:MM>` for every shown value and `DEBUG TICK n=60 avg <us> max <us> (read, set over <changes>, log)` for the read-tick cost. The `cost` scenario uses `profile = true` instead: only the whole-tick `TICK` line, at info level, as a normal install runs.
 
 ## Tests
 
@@ -56,14 +56,16 @@ $copy = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'
 ./run.ps1 -Instance $copy -Scenario rebuild    # RemoveAllWidgets and re-add the HUD mid-match
 ./run.ps1 -Instance $copy -Scenario no-core    # Nucleus moved aside: deploy refuses; forced, one [Clock] line, no widget
 ./run.ps1 -Instance $copy -Scenario old-core   # Nucleus mod.json set to 0.1.0: deploy refuses; forced, one [Clock] line
+./run.ps1 -Instance $copy -Scenario cost       # cost of each engine call, then 200 s idle as installed (story 3 AC 5)
 ./check.ps1 -Log <a kept log> -Scenario match  # judge a kept log again
 ```
 
 | Scenario | What it proves |
 |---|---|
-| `match` | Drawn in match 1, one widget, `HH:MM` equal to the sky's own conversion, top-right with the 16-unit gap; follows the host moving `Time of Day` forward (+120 and +61 minutes; +300 in match 2); not drawn at the menu; the same again in match 2. Every shown value is valid; the read tick averages under 0.1 ms; each match's sky belongs to its own world |
+| `match` | Drawn in match 1, one widget, `HH:MM` equal to the sky's own conversion, top-right with the 16-unit gap; follows the host moving `Time of Day` forward (+120 and +61 minutes; +300 in match 2); not drawn at the menu; the same again in match 2. Every shown value is valid; each match's sky belongs to its own world; 200 s idle in match 2, still matching the sky |
 | `step5` | With `updateEvery = 5` and the sky frozen (`Animate Time of Day` off): 10 chosen times each show the value rounded down to 5; every logged value is a multiple of 5 |
 | `rebuild` | After `RemoveAllWidgets` and `AddToViewport`, the clock is drawn again, reused, one widget |
+| `cost` | The cost of each engine call a read makes (`COST` lines), then 200 s idle in a match with the clock as installed (no DEBUG lines): the read tick averages under 0.1 ms, leaving out the first minute (menu and travel) |
 | `no-core` | `deploy.ps1` refuses in one line; forced, the log has exactly one `[Clock]` line ("Nucleus is not installed. Clock will not run.") and no clock widget |
 | `old-core` | `deploy.ps1` refuses naming both versions; forced, exactly one `[Clock]` line: "Nucleus 0.1.0 is not compatible; Clock needs 0.2.0 (^ rules). ..." |
 
@@ -80,7 +82,7 @@ The driver (`test/ClockDriver/`, installed as `Mods/ClockDriver` between Nucleus
 3. **Map text vs H/M/S:** `differing=0` in the summaries. If the map widget doesn't exist until the Journal is opened (`map=n/a`), open the Journal by hand during a hand run and compare with `[Clock] DEBUG SHOW`.
 4. **Jumps and the wrap:** `jumps=` in the summaries and the `MEASURE wrap` first/last lines. Sleeping or skipping (if the game has them) needs a hand run.
 
-Write the answers, with the log lines, into the workspace's `docs/game-internals.md` ("In-game time"). The clock polls once a second; switch to the minute event only if question 2 shows it reliable on host and client.
+Answered on V8.1.2 (2026-10-26, `docs/game-internals.md`, "In-game time"): a game minute takes 0.56 / 0.83 / 1.67 real s at Fast / Normal / Long (Day Length and Night Length 10 min each); UDS checks for a new minute on a 1 s timer, so `Every Minute` fires at most once a real second and skips minutes at Fast and Normal; the map uses the same conversion (decompiled `Get DateTime`), but its widget caches the sky only once the Journal is opened, so the unattended run can't read it (`map=nosky`: compare by hand); no jumps, and `Time of Day` wraps from 2400 to 0 with `Total Days Elapsed` +1. **The clock polls once a second:** the minute event is no more frequent and no more exact. With `updateEvery = 1` at Fast or Normal the clock therefore steps by one or two minutes a second, as the spec allows (a change may show up to one second late).
 
 ### Hand check (about 5 minutes)
 

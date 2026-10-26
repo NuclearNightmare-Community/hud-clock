@@ -67,7 +67,6 @@ $driven = $running + @(
     "\[$D\] SCENARIO $([regex]::Escape($Scenario))\s*$"
     "\[$D\] END result=PASS"
     "\[$C\] DEBUG SHOW \d\d:\d\d\s*$"
-    "\[$C\] DEBUG TICK n=\d+ avg "
     # Lua's conversion checked against the sky's own Time Of Day to H/M/S, once per sky.
     "\[$C\] VERIFY \d+\.\d+ -> \d\d:\d\d, the same as 'Time Of Day to H/M/S'"
 )
@@ -81,6 +80,7 @@ $expect = @{
         "\[$D\] OK SKYWORLD match1 ", "\[$D\] OK SKYWORLD match2 "
         # A few minutes idle in match 2 (read-tick cost, story 3 AC 5); the clock still follows the sky after it.
         "\[$D\] IDLE match2 ", "\[$D\] OK ONE match2-idle ", "\[$D\] OK MATCHES match2-idle "
+        "\[$C\] DEBUG TICK n=\d+ avg "
     )
     'step5' = $driven + @(
         "\[$D\] FREEZE match1 "
