@@ -25,7 +25,7 @@ local time = require("time")
 -- remembered here and logged once connected, so a missing core still leaves exactly one [Clock] line.
 local SETTINGS_DEFAULT = { updateEvery = 1 }
 local function loadSettings()
-    local s = { updateEvery = SETTINGS_DEFAULT.updateEvery, debug = false }
+    local s = { updateEvery = SETTINGS_DEFAULT.updateEvery, debug = false, profile = false }
     local chunk, err = loadfile(scriptDir .. "/settings.lua", "t", {})
     if not chunk then return s, "settings.lua could not be read (" .. tostring(err) .. "); run deploy.ps1. Using updateEvery = 1" end
     local okS, t = pcall(chunk)
@@ -34,7 +34,8 @@ local function loadSettings()
     local n = t.updateEvery
     if math.type(n) == "integer" and n >= 1 and n <= 60 then s.updateEvery = n
     elseif n ~= nil then problem = "updateEvery must be an integer from 1 to 60, got " .. tostring(n) .. "; using 1" end
-    s.debug = t.debug == true
+    s.debug = t.debug == true     -- DEBUG lines (SHOW per value, TICK cost): deploy.ps1 -Test
+    s.profile = t.profile == true -- only the TICK cost lines, at info level: deploy.ps1 -Test -Scenario cost
     return s, problem
 end
 local settings, settingsProblem = loadSettings()
@@ -50,6 +51,7 @@ local function start(core)
         return
     end
     local n = settings.updateEvery
+    if core.ref and core.deref and core.free then time.useHandles(core.ref, core.deref, core.free) end
 
     local okC, el = pcall(ui.create, { id = ELEMENT, text = "", place = PLACE })
     if not okC then log.error("could not create the clock element: %s. %s will not run.", tostring(el), ME) return end
@@ -58,7 +60,7 @@ local function start(core)
     local last         -- the boundary last shown; nil after a hide, so the next value shows at once
     local visible = false
     local warned, nWarned = {}, 0 -- reasons already logged: each read error once, at most 8 different ones
-    local cost = { n = 0, sum = 0, max = 0 }
+    local cost = { n = 0, sum = 0, max = 0, read = 0, set = 0, sets = 0, log = 0 } -- DEBUG timing, per COST_EVERY ticks
     local micros = type(core.clock) == "table" and core.clock.micros or nil
 
     local function hide(reason)
@@ -72,23 +74,38 @@ local function start(core)
         end
     end
 
+    -- Timings only when they're logged: the whole tick with debug or profile, the split (read/set/log, four more
+    -- clock reads a tick) only with debug, so profile measures the tick about as a normal install runs it.
+    local total = micros and (settings.debug or settings.profile)
+    local timing = micros and settings.debug
     local function tick()
+        local t0 = timing and micros()
         local h, m = time.read()
+        if timing then cost.read = cost.read + (micros() - t0) end
+        local note, level = time.takeNote()
+        if note then log[level == "warn" and "warn" or "info"]("%s", note) end
         if not h then hide(m) return end
         local b = time.boundary(h, m, n)
         if b ~= last then
             local text = time.format(h, m, n)
+            local t1 = timing and micros()
             ui.set(el, text)
+            if timing then cost.set = cost.set + (micros() - t1) end
+            cost.sets = cost.sets + 1
             last = b
+            local t2 = timing and micros()
             log.debug("SHOW %s", text)
+            if timing then cost.log = cost.log + (micros() - t2) end
             if not visible then log.info("VISIBLE %s (updateEvery=%d)", text, n) end
         end
-        ui.setVisible(el, true) -- repeated calls with the same value cost nothing (UI-2)
+        -- Shown once per appearance: core makes a repeated setVisible a no-op, but even a no-op call costs a few
+        -- tens of microseconds a tick (its game-thread check and lookup), so it isn't repeated.
+        if not visible then ui.setVisible(el, true) end
         visible = true
     end
 
     local function timedTick()
-        local t0 = micros and micros()
+        local t0 = total and micros()
         local okT, err = pcall(tick)
         if not okT then
             if not warned.tick then warned.tick = true; log.warn("tick failed: %s", tostring(err)) end
@@ -100,8 +117,11 @@ local function start(core)
             cost.n, cost.sum = cost.n + 1, cost.sum + dt
             if dt > cost.max then cost.max = dt end
             if cost.n >= COST_EVERY then
-                log.debug("TICK n=%d avg %.1f max %d us", cost.n, cost.sum / cost.n, cost.max)
-                cost.n, cost.sum, cost.max = 0, 0, 0
+                -- avg/max cover the whole tick; read is time.read, set is core's ui.text.set (n of them changed the
+                -- text), log is the DEBUG SHOW line itself (0 without debug), all averaged over the ticks.
+                log[settings.profile and "info" or "debug"]("TICK n=%d avg %.1f max %d us (read %.1f, set %.1f over %d changes, log %.1f)", cost.n, cost.sum / cost.n,
+                    cost.max, cost.read / cost.n, cost.set / cost.n, cost.sets, cost.log / cost.n)
+                cost.n, cost.sum, cost.max, cost.read, cost.set, cost.sets, cost.log = 0, 0, 0, 0, 0, 0, 0
             end
         end
     end

@@ -4,14 +4,17 @@
 --   time.format(h, m, n)   -> "HH:MM"                       minute rounded down to a multiple of n
 --   time.boundary(h, m, n) -> integer                       changes exactly when format's text changes
 --   time.forget()                                           drop the remembered sky path (after a map change)
+--   time.takeNote()        -> message, level | nil          the once-per-sky conversion check's result, to log
+--   time.useHandles(ref, deref, free)                       keep the sky as a core weak handle instead of a path
 --
 -- The sky (Ultra_Dynamic_Sky_C) keeps `Time of Day` as a double, 0..2400, 100 units per hour; its own
--- `Time Of Day to H/M/S` turns that into hour/minute/second (Time % 2400, so hours are 0..23). The Journal map
+-- `Time Of Day to H/M/S` turns that into hour/minute/second (Time % 2400, so hours are 0..23); hmFromTod below does
+-- the same in Lua, checked against the function once per sky. The Journal map
 -- (MapWidget_C.GetText_0) formats the same conversion (via the sky's Get DateTime) as zero-padded HH:MM.
 -- Clients read their own replicated copy; nothing here sends anything or reads anything from another player.
 --
--- No UObject is kept between calls (AGENTS.md): only the sky's path, re-found with StaticFindObject (a cheap
--- lookup), and FindFirstOf (a scan) only when the path no longer resolves.
+-- No UObject is kept between calls (AGENTS.md): only the sky's path and, with core, a weak handle to it, re-found
+-- each call; FindFirstOf (a scan, about 120 us) only when that no longer resolves or after a map change.
 local M = {}
 
 local SKY_CLASS = "Ultra_Dynamic_Sky_C"
@@ -57,9 +60,10 @@ end
 
 -- ---------------------------------------------------------------- the one game call
 
+local function isValidOf(o) return o:IsValid() end -- no closure per call: a tick allocates as little as possible
 local function valid(o)
     if o == nil then return false end
-    local ok, v = pcall(function() return o:IsValid() end)
+    local ok, v = pcall(isValidOf, o)
     return ok and v == true
 end
 
@@ -75,8 +79,23 @@ local function outNumber(t)
     return nil
 end
 
+-- With core's weak handles (useHandles), the sky is kept as a handle and re-found with one native Deref (about
+-- 5 us on V8.1.2) instead of StaticFindObject by path plus IsValid; without them (unit tests), by path.
+local H -- { ref, deref, free } from core, or nil
+local skyHandle
+
+local function dropHandle()
+    if skyHandle and H then pcall(H.free, skyHandle) end
+    skyHandle = nil
+end
+
 local function findSky()
-    if skyPath then
+    if H and skyHandle then
+        local okD, s = pcall(H.deref, skyHandle)
+        if okD and s ~= nil then return s end
+        dropHandle()
+        skyPath = nil
+    elseif skyPath and not H then
         local s = StaticFindObject(skyPath)
         if valid(s) then return s end
         skyPath = nil
@@ -86,14 +105,30 @@ local function findSky()
     local p = pathOf(s)
     if p:find("Default__", 1, true) then return nil end
     skyPath = p
+    if H then
+        local okR, h = pcall(H.ref, s)
+        if okR then skyHandle = h end
+    end
     return s
 end
 
-local function readRaw()
-    local sky = findSky()
-    if not sky then return nil, "no sky" end
-    local tod = sky[TOD]
-    if type(tod) ~= "number" then return nil, "'" .. TOD .. "' is not a number (" .. type(tod) .. ")" end
+-- useHandles(ref, deref, free): core's weak-handle functions (core.ref, core.deref, core.free).
+function M.useHandles(ref, deref, free)
+    dropHandle()
+    H = { ref = ref, deref = deref, free = free }
+end
+
+-- The sky's own conversion, done in Lua: the decompiled `Time Of Day to H/M/S` is Time % 2400, / 100, floor for the
+-- hour, the fraction * 60, floor for the minute; the same IEEE double operations give the same result. Calling the
+-- Blueprint function costs about 100 us a second (measured on V8.1.2: looking it up by name dominates), reading the
+-- property about 9 us, so the clock converts in Lua and checks that against the function once per sky.
+function M.hmFromTod(tod)
+    local x = (tod % 2400) / 100
+    local h = math.floor(x)
+    return h, math.floor((x - h) * 60)
+end
+
+local function viaFunction(sky, tod)
     local fn = sky[TO_HMS]
     if fn == nil then return nil, "'" .. TO_HMS .. "' is missing on " .. SKY_CLASS end
     local oh, om, os_, of = {}, {}, {}, {}
@@ -103,6 +138,42 @@ local function readRaw()
         return nil, string.format("'%s' returned no hour/minute (hour=%s minute=%s)", TO_HMS, tostring(h), tostring(m))
     end
     return math.floor(h), math.floor(m)
+end
+
+local verifiedPath        -- the sky whose Lua conversion was checked against its function
+local useFunction = false -- set for the rest of the session once the two ever disagree
+local note, noteLevel     -- what the last check found, for the caller to log once (takeNote)
+
+local function readRaw()
+    local sky = findSky()
+    if not sky then return nil, "no sky" end
+    local tod = sky[TOD]
+    if type(tod) ~= "number" then return nil, "'" .. TOD .. "' is not a number (" .. type(tod) .. ")" end
+    if useFunction then return viaFunction(sky, tod) end
+    local h, m = M.hmFromTod(tod)
+    if verifiedPath ~= skyPath then
+        verifiedPath = skyPath
+        local okF, fh, fm = pcall(viaFunction, sky, tod)
+        if not okF or fh == nil then
+            note, noteLevel = string.format("could not check the conversion against '%s' (%s); using Lua's", TO_HMS,
+                tostring(okF and fm or fh):match("^[^\n]*")), "warn"
+        elseif fh ~= h or fm ~= m then
+            useFunction = true
+            note, noteLevel = string.format("Lua's conversion of %.4f gave %d:%02d, '%s' %d:%02d; using the sky's function from now on",
+                tod, h, m, TO_HMS, fh, fm), "warn"
+            return fh, fm
+        else
+            note, noteLevel = string.format("VERIFY %.4f -> %02d:%02d, the same as '%s'", tod, h, m, TO_HMS), "info"
+        end
+    end
+    return h, m
+end
+
+-- takeNote() -> message, level ("info" | "warn") | nil: what the last conversion check found, once.
+function M.takeNote()
+    local n, l = note, noteLevel
+    note, noteLevel = nil, nil
+    return n, l
 end
 
 -- read() -> hour, minute | nil, reason. Never raises: an engine error comes back as nil, "read failed: ...".
@@ -116,7 +187,7 @@ function M.read()
     return h, m
 end
 
-function M.forget() skyPath = nil end
+function M.forget() dropHandle(); skyPath, verifiedPath = nil, nil end -- a new world: find its sky and check it again
 
 -- Diagnostics (tests, debug lines): the remembered sky path or nil.
 function M.skyPath() return skyPath end

@@ -70,6 +70,7 @@ $text = ConvertTo-SettingsLua -Manifest $m
 Ok ($text -match "(?m)^return \{ updateEvery = 1 \}$") 'settings: default updateEvery = 1' $text
 Ok ((ConvertTo-SettingsLua -Manifest $m -Override @{ updateEvery = 5 }) -match 'return \{ updateEvery = 5 \}') 'settings: override 5'
 Ok ((ConvertTo-SettingsLua -Manifest $m -DebugLog) -match 'return \{ updateEvery = 1, debug = true \}') 'settings: -DebugLog adds debug = true'
+Ok ((ConvertTo-SettingsLua -Manifest $m -Profile) -match 'return \{ updateEvery = 1, profile = true \}') 'settings: -Profile adds profile = true'
 Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ updateEvery = 61 } } 'not an integer from 1 to 60' 'settings: 61 refused'
 Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ updateEvery = 0 } } 'not an integer from 1 to 60' 'settings: 0 refused'
 Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ updateEvery = '5' } } 'not an integer' 'settings: a string refused'
@@ -168,6 +169,8 @@ try {
     Eq (Txt) ("Nucleus : 1`r`nClockDriver : 1`r`nClock : 1`r`n" + $stockTxt) 'deploy -Test: Nucleus, ClockDriver, Clock, then the rest'
     Eq ([IO.File]::ReadAllText((Join-Path $mods 'ClockDriver\Scripts\scenario.txt'))) 'step5' 'deploy -Test: scenario.txt'
     Ok ((Get-Content (Join-Path $mods 'Clock\Scripts\settings.lua') -Raw) -match 'return \{ updateEvery = 5, debug = true \}') 'deploy -Test step5: updateEvery 5, debug on'
+    $d = Deploy @('-Test', '-Scenario', 'cost')
+    Ok ((Get-Content (Join-Path $mods 'Clock\Scripts\settings.lua') -Raw) -match 'return \{ updateEvery = 1, profile = true \}') 'deploy -Test cost: profile on, no debug' $d.Out
     $d = Deploy @()
     Ok (-not (Test-Path (Join-Path $mods 'ClockDriver')) -and (Txt) -eq ("Nucleus : 1`r`nClock : 1`r`n" + $stockTxt)) 'deploy without -Test removes the driver'
 

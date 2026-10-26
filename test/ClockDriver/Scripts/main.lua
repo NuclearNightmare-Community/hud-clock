@@ -108,6 +108,14 @@ local function hhmm(h, m, n)
     mm = mm - mm % n
     return string.format("%02d:%02d", hh, mm)
 end
+-- The clock reads once a second and a game minute lasts 0.56 to 1.67 real s (Day Length 10 + Night Length 10 min
+-- at Time Speed 1.5 to 0.5; measure scenario), so the text may trail the sky by up to LAG game minutes.
+local LAG = 3
+local function lagging(text, h, m, n)
+    if not (text and h) then return false end
+    for d = 0, LAG do if text == hhmm(h, m - d, n) then return true end end
+    return false
+end
 -- Time of Day for hour:minute, a fifth of the way into the minute (so a frozen sky never sits on a boundary).
 local function todOf(h, m) return h * 100 + (m + 0.2) * 100 / 60 end
 
@@ -259,9 +267,8 @@ local function clockShown(phase, n)
         check(type(st.text) == "string" and st.text:match("^%d%d:%d%d$") ~= nil, "FORMAT %s text is HH:MM (%s)", phase, tostring(st.text))
         local h, m = skyHms()
         local want = h and hhmm(h, m, n)
-        -- The clock reads once a second: the sky may have moved on by one step since.
-        local prev = h and hhmm(h, m - (n or 1), n)
-        check(want ~= nil and (st.text == want or st.text == prev), "MATCHES %s text %s matches the sky's %s (H/M/S %s:%s)", phase, tostring(st.text), tostring(want), tostring(h), tostring(m))
+        -- The clock reads once a second: the sky may have moved on since (LAG).
+        check(want ~= nil and lagging(st.text, h, m, n), "MATCHES %s text %s matches the sky's %s (H/M/S %s:%s)", phase, tostring(st.text), tostring(want), tostring(h), tostring(m))
         if w and hud then checkCorner(phase, w, hud) end
         S.lastText = st.text
     end)
@@ -277,17 +284,20 @@ local function forceForward(phase, minutes)
         s["Time of Day"] = new
         say("FORCE %s Time of Day %.2f -> %.2f (+%d game minutes); clock showed %s", phase, tod, new, minutes, tostring(S.lastText))
         S.forcedFrom = S.lastText
+        -- The time also moves on by itself, so wait for the text to reach the forced time, not just to change.
         return function()
             local st = state()
-            return st.drawn and st.text ~= nil and st.text ~= S.forcedFrom
-        end, 5, phase .. " clock changed after forcing time"
+            local h, m = skyHms()
+            return st.drawn and st.text ~= S.forcedFrom and lagging(st.text, h, m)
+        end, 5, phase .. " clock followed the forced time"
     end)
     step(phase .. ": changed", function()
         local st = state()
         local h, m = skyHms()
         local want = h and hhmm(h, m)
-        check(st.text ~= S.forcedFrom and (st.text == want or st.text == hhmm(h, m - 1)),
+        check(st.text ~= S.forcedFrom and lagging(st.text, h, m),
             "CHANGED %s %s -> %s within 5 s, the sky says %s", phase, tostring(S.forcedFrom), tostring(st.text), tostring(want))
+        S.lastText = st.text
     end)
 end
 
@@ -319,6 +329,18 @@ local function noClock(phase, seconds)
     end)
 end
 
+-- A few minutes in a match with nothing else going on, so the clock logs several read-tick cost lines (one per 60
+-- ticks) and the text keeps following the sky. Checked once at the end.
+local IDLE_S = 200
+local function idle(phase, seconds)
+    step(phase .. ": idle", function()
+        say("IDLE %s %d s in the match from here", phase, seconds)
+        local since = os.clock()
+        return function() return os.clock() - since >= seconds end, seconds + 10, phase .. " idle"
+    end)
+    clockShown(phase .. "-idle")
+end
+
 -- ---------------------------------------------------------------- scenarios
 local function buildMatch()
     waitWorld("menu1", "NewMainMenu", 120)
@@ -327,7 +349,7 @@ local function buildMatch()
     enterMatch("match1")
     skies("match1")
     clockShown("match1")
-    forceForward("match1", 3)
+    forceForward("match1", 120)
     forceForward("match1", 61)
     toMenu("menu2")
     skies("menu2")
@@ -335,7 +357,8 @@ local function buildMatch()
     enterMatch("match2")
     skies("match2")
     clockShown("match2")
-    forceForward("match2", 7)
+    forceForward("match2", 300)
+    idle("match2", IDLE_S)
 end
 
 -- updateEvery = 5: the sky is frozen ('Animate Time of Day' off) and set to chosen minutes.
@@ -417,11 +440,21 @@ end
 -- ---------------------------------------------------------------- measure (story 2 part A)
 local MEASURE_SPEEDS = { { "Fast", 1.5 }, { "Normal", 1.0 }, { "Long", 0.5 } }
 local MEASURE_SECONDS = 120
+-- The Journal map's own text (MapWidget_C.GetText_0), from a map widget whose cached DynamicSky is set (it's cached on
+-- Construct, so a map never opened reads "00:00" from no sky): "n/a" without a map widget, "nosky" without a live one.
 local function mapText()
-    local m = FindFirstOf("MapWidget_C")
-    if not valid(m) then return "n/a" end
-    local ok, t = pcall(function() return m:GetText_0():ToString() end)
-    return ok and t or ("error: " .. tostring(t))
+    local any = false
+    for _, m in ipairs(FindAllOf("MapWidget_C") or {}) do
+        if valid(m) then
+            any = true
+            local okS, sk = pcall(function() return m.DynamicSky end)
+            if okS and valid(sk) then
+                local ok, t = pcall(function() return m:GetText_0():ToString() end)
+                return ok and t or ("error: " .. tostring(t))
+            end
+        end
+    end
+    return any and "nosky" or "n/a"
 end
 local function buildMeasure()
     waitWorld("menu1", "NewMainMenu", 120)
@@ -493,6 +526,55 @@ local function buildMeasure()
     skies("match2")
 end
 
+-- ---------------------------------------------------------------- cost: what each part of a clock read costs
+-- Times, on the game thread in a match, each engine call the clock's tick makes, N times each, with core's monotonic
+-- clock (its native is registered into every Lua state). Diagnostic only.
+local function costProfile(phase, N)
+    step(phase .. ": cost", function()
+        local us = _G[CORE .. "_ClockMicros"]
+        if not check(type(us) == "function", "COSTCLOCK %s %s_ClockMicros available", phase, CORE) then return end
+        local s = sky()
+        if not check(s ~= nil, "SKY %s live sky found", phase) then return end
+        local path = pathOf(s)
+        local function run(label, fn)
+            local t0 = us()
+            for _ = 1, N do fn() end
+            say("COST %s %s avg %.1f us (n=%d)", phase, label, (us() - t0) / N, N)
+        end
+        local probe = StaticFindObject(path)
+        say("COST %s StaticFindObject(%s) valid=%s", phase, path, tostring(valid(probe)))
+        run("StaticFindObject+IsValid", function() local o = StaticFindObject(path); o:IsValid() end)
+        -- The clock's own time.lua, loaded fresh into this state: the real read path, and whether it keeps its path.
+        local modsDir = scriptDir:match("^(.*)[/\\][^/\\]+[/\\][Ss]cripts$")
+        local okT, T = pcall(dofile, modsDir .. "\\" .. CLOCK .. "\\Scripts\\time.lua")
+        if okT and type(T) == "table" then
+            local h, m = T.read()
+            say("COST %s time.read -> %s %s; remembered path %s", phase, tostring(h), tostring(m), tostring(T.skyPath()))
+            run("time.read()", function() T.read() end)
+            say("COST %s after the loop: remembered path %s", phase, tostring(T.skyPath()))
+            S.costTime = T
+        else
+            say("COST %s could not load the clock's time.lua: %s", phase, tostring(T))
+        end
+        run("FindFirstOf", function() FindFirstOf("Ultra_Dynamic_Sky_C") end)
+        local o = StaticFindObject(path)
+        run("read Time of Day", function() return o["Time of Day"] end)
+        run("index the function", function() return o[TO_HMS] end)
+        local fn = o[TO_HMS]
+        run("call Time Of Day to H/M/S", function() fn(o, 600.0, {}, {}, {}, {}) end)
+        run("all of time.read's calls", function()
+            local x = StaticFindObject(path); x:IsValid()
+            local t = x["Time of Day"]; local f = x[TO_HMS]; f(x, t, {}, {}, {}, {})
+        end)
+        run("Lua H/M from Time of Day", function()
+            local t = o["Time of Day"] % 2400 / 100
+            local h = math.floor(t); local m = math.floor((t - h) * 60)
+            return h, m
+        end)
+        run("print a log line", function() print("[" .. ME .. "] COST probe line\n") end)
+    end)
+end
+
 -- ---------------------------------------------------------------- runner (game thread, every 250 ms)
 local idx, waiting, busy, finished = 0, nil, false, false
 local function finish()
@@ -523,7 +605,40 @@ local function tick()
     busy = false
 end
 
-local build = ({ match = buildMatch, step5 = buildStep5, rebuild = buildRebuild, ["no-core"] = buildNoClock,
+local function buildCost()
+    waitWorld("menu1", "NewMainMenu", 120)
+    waitHud("menu1", 60)
+    enterMatch("match1")
+    costProfile("match1", 200)
+    -- The clock reads once a second, not in a tight loop: the same calls, one per second for 30 s.
+    step("match1: cold cost", function()
+        local us = _G[CORE .. "_ClockMicros"]
+        local T = S.costTime
+        if not (us and T) then return end
+        local acc = { read = 0, prop = 0, n = 0, maxRead = 0 }
+        local nextAt = os.clock()
+        return function()
+            if os.clock() < nextAt then return false end
+            nextAt = nextAt + 1
+            local t0 = us(); T.read(); local d = us() - t0
+            acc.read = acc.read + d; if d > acc.maxRead then acc.maxRead = d end
+            local t1 = us()
+            local p = T.skyPath() and StaticFindObject(T.skyPath())
+            if p and p:IsValid() then local x = p["Time of Day"] % 2400 / 100; local _ = math.floor(x) end
+            acc.prop = acc.prop + (us() - t1)
+            acc.n = acc.n + 1
+            if acc.n >= 30 then
+                say("COST match1 once a second: time.read avg %.1f max %d us; path+property+Lua math avg %.1f us (n=%d)",
+                    acc.read / acc.n, acc.maxRead, acc.prop / acc.n, acc.n)
+                return true
+            end
+            return false
+        end, 45, "cold cost"
+    end)
+    idle("match1", IDLE_S)
+end
+
+local build = ({ cost = buildCost, match = buildMatch, step5 = buildStep5, rebuild = buildRebuild, ["no-core"] = buildNoClock,
                  ["old-core"] = buildNoClock, measure = buildMeasure })[SCENARIO]
 if not build then
     say("END result=FAIL checks=0 failures=1 reason=unknown-scenario %s", SCENARIO)

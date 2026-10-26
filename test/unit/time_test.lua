@@ -156,19 +156,55 @@ do
     time.read()
     eq(calls.find, f1 + 1, "forget: next read uses FindFirstOf")
 
-    -- The conversion function is missing (a game patch): nil and a reason, never an error.
+    -- The conversion is done in Lua and checked against the sky's function once per sky (and after forget()).
+    local hms0 = calls.hms
+    time.forget(); time.takeNote()
+    h, m = time.read()
+    local note, level = time.takeNote()
+    ok(h == 6 and m == 0 and level == "info" and tostring(note):find("^VERIFY 600%.0000 %-> 06:00, the same as 'Time Of Day to H/M/S'"),
+        "check: once per sky, logged as VERIFY", tostring(note))
+    eq(calls.hms, hms0 + 1, "check: one call of the sky's function")
+    time.read(); time.read()
+    eq(calls.hms, hms0 + 1, "check: later reads don't call the function")
+    ok(time.takeNote() == nil, "check: the note is given once")
+
+    -- The function is missing after a patch: the Lua conversion goes on, with one WARN note.
     local saved = sky2["Time Of Day to H/M/S"]
     sky2["Time Of Day to H/M/S"] = nil
+    time.forget()
     h, m = time.read()
-    ok(h == nil and tostring(m):find("'Time Of Day to H/M/S' is missing", 1, true), "read: function missing -> nil, reason", tostring(m))
-    -- The function throws.
+    note, level = time.takeNote()
+    ok(h == 6 and m == 0 and level == "warn" and tostring(note):find("could not check the conversion", 1, true) and tostring(note):find("is missing", 1, true),
+        "check: function missing -> Lua's time and a WARN note", tostring(note))
+    -- It throws: same, one line.
+    sky2["Time Of Day to H/M/S"] = function() error("boom\nsecond line") end
+    time.forget()
+    h, m = time.read()
+    note, level = time.takeNote()
+    ok(h == 6 and level == "warn" and tostring(note):find("boom", 1, true) and not tostring(note):find("\n", 1, true), "check: function throws -> one-line WARN note", tostring(note))
+    -- No out values.
+    sky2["Time Of Day to H/M/S"] = function() end
+    time.forget()
+    h, m = time.read()
+    note, level = time.takeNote()
+    ok(h == 6 and level == "warn" and tostring(note):find("returned no hour/minute", 1, true), "check: no out values -> WARN note", tostring(note))
+    -- The function disagrees: its answer wins, now and for the rest of the session.
+    sky2["Time Of Day to H/M/S"] = function(self, t, oh, om) oh.Hour = 7; om.Minute = 1 end
+    time.forget()
+    h, m = time.read()
+    note, level = time.takeNote()
+    ok(h == 7 and m == 1 and level == "warn" and tostring(note):find("using the sky's function from now on", 1, true), "check: disagreement -> the function's answer, WARN", tostring(note))
+    local hms1 = calls.hms
+    sky2["Time Of Day to H/M/S"] = function(self, t, oh, om) calls.hms = calls.hms + 1; oh.Hour = 7; om.Minute = 2 end
+    h, m = time.read()
+    ok(h == 7 and m == 2 and calls.hms == hms1 + 1, "check: after a disagreement every read uses the function", tostring(h) .. ":" .. tostring(m))
+    -- From here on the function is in use: a missing one is now a read error.
+    sky2["Time Of Day to H/M/S"] = nil
+    h, m = time.read()
+    ok(h == nil and tostring(m):find("'Time Of Day to H/M/S' is missing", 1, true), "function in use and missing -> nil, reason", tostring(m))
     sky2["Time Of Day to H/M/S"] = function() error("boom\nsecond line") end
     h, m = time.read()
-    ok(h == nil and tostring(m):find("read failed: ", 1, true) and not tostring(m):find("\n", 1, true), "read: function throws -> nil, one-line reason", tostring(m))
-    -- No out values written.
-    sky2["Time Of Day to H/M/S"] = function() end
-    h, m = time.read()
-    ok(h == nil and tostring(m):find("returned no hour/minute", 1, true), "read: no out values -> nil, reason", tostring(m))
+    ok(h == nil and tostring(m):find("read failed: ", 1, true) and not tostring(m):find("\n", 1, true), "function in use and throws -> nil, one-line reason", tostring(m))
     sky2["Time Of Day to H/M/S"] = saved
     -- Time of Day isn't a number.
     sky2["Time of Day"] = nil
@@ -187,6 +223,22 @@ do
     firstSky = cdo
     h, m = time.read()
     ok(h == nil and m == "no sky", "read: CDO ignored", tostring(m))
+end
+
+-- hmFromTod is the decompiled formula: compare with it over a dense sweep of Time of Day.
+do
+    local bad = 0
+    for i = 0, 240000 do
+        local t = i * 0.01 + (i % 7) * 1e-4
+        local x = (t % 2400) / 100
+        local hh = math.floor(x)
+        local mf = (x - hh) * 60
+        local h2, m2 = time.hmFromTod(t)
+        if h2 ~= hh or m2 ~= math.floor(mf) then bad = bad + 1 end
+    end
+    eq(bad, 0, "hmFromTod: same as the sky's formula over 240001 values")
+    local h, m = time.hmFromTod(2400.0); ok(h == 0 and m == 0, "hmFromTod: 2400 -> 0:00")
+    h, m = time.hmFromTod(659.06); ok(h == 6 and m == 35, "hmFromTod: 659.06 -> 6:35 (logged in game as 6:35:26)")
 end
 
 print(("time_test: %d passed, %d failed"):format(passed, failed))
