@@ -61,7 +61,7 @@ $copy = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'
 
 | Scenario | What it proves |
 |---|---|
-| `match` | Drawn in match 1, one widget, `HH:MM` equal to the sky's own conversion, top-right with the 16-unit gap; changes after the host moves `Time of Day` forward (+3 and +61 minutes); not drawn at the menu; the same again in match 2. Every shown value is valid; the read tick averages under 0.1 ms; each match's sky belongs to its own world |
+| `match` | Drawn in match 1, one widget, `HH:MM` equal to the sky's own conversion, top-right with the 16-unit gap; follows the host moving `Time of Day` forward (+120 and +61 minutes; +300 in match 2); not drawn at the menu; the same again in match 2. Every shown value is valid; the read tick averages under 0.1 ms; each match's sky belongs to its own world |
 | `step5` | With `updateEvery = 5` and the sky frozen (`Animate Time of Day` off): 10 chosen times each show the value rounded down to 5; every logged value is a multiple of 5 |
 | `rebuild` | After `RemoveAllWidgets` and `AddToViewport`, the clock is drawn again, reused, one widget |
 | `no-core` | `deploy.ps1` refuses in one line; forced, the log has exactly one `[Clock]` line ("Nucleus is not installed. Clock will not run.") and no clock widget |

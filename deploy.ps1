@@ -11,7 +11,7 @@
   Mods/ClockDriver and those mods.txt lines, and never bundles any of core's files.
   -Test also installs the test driver (test/ClockDriver as Mods/ClockDriver, between Nucleus and Clock), writes the
   scenario to its Scripts/scenario.txt, and turns on the clock's DEBUG lines (settings.lua debug = true), which
-  check.ps1 reads. step5 implies -UpdateEvery 5.
+  check.ps1 reads (cost: only the TICK cost lines, settings.lua profile = true). step5 implies -UpdateEvery 5.
   -Remove deletes Mods/Clock, Mods/ClockDriver and their mods.txt lines; nothing else changes (mods.txt keeps its
   bytes when it had no clock lines).
   Pass the main checkout's instance path when running from a worktree.
@@ -24,7 +24,7 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure')]
+    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost')]
     [string] $Scenario = 'match',
     [ValidateRange(0, 60)] [int] $UpdateEvery = 0,  # 0: mod.json's default
     [switch] $Force,
@@ -90,7 +90,8 @@ if ($problem) {
 $override = @{}
 if ($Scenario -eq 'step5' -and $Test -and $UpdateEvery -eq 0) { $UpdateEvery = 5 }
 if ($UpdateEvery -gt 0) { $override.updateEvery = $UpdateEvery }
-$settings = ConvertTo-SettingsLua -Manifest $manifest -Override $override -DebugLog:$Test
+# cost measures the clock as a normal install runs it: no DEBUG lines, only the TICK cost lines.
+$settings = ConvertTo-SettingsLua -Manifest $manifest -Override $override -DebugLog:($Test -and $Scenario -ne 'cost') -Profile:($Test -and $Scenario -eq 'cost')
 foreach ($d in $mine) { Remove-Item (Join-Path $modsDir $d) -Recurse -Force -ErrorAction SilentlyContinue }
 $dest = Join-Path $modsDir "$name\Scripts"
 New-Item -ItemType Directory -Force $dest | Out-Null

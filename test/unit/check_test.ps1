@@ -37,7 +37,8 @@ function Running([int] $n, [string] $scenario) {
         (L 'Clock' "ui attach 'clock.time' created /Engine/Transient.GameEngine_1:BP_GameInstance_C_1.WBP_NucleusText_C_1 (HUD appeared)"),
         (L 'Clock' "VISIBLE 10:05 (updateEvery=$n)"))
     foreach ($s in '10:05', '10:10', '10:15') { $l += L 'Clock' "DEBUG SHOW $s" }
-    $l += L 'Clock' 'DEBUG TICK n=60 avg 31.5 max 210 us'
+    $l += L 'Clock' "VERIFY 659.0600 -> 06:35, the same as 'Time Of Day to H/M/S'"
+    $l += L 'Clock' 'DEBUG TICK n=60 avg 131.5 max 210 us (read 10.2, set 20.1 over 40 changes, log 100.0)'
     $l += L 'Clock' 'DEBUG TICK n=60 avg 28.0 max 180 us'
     $l += L 'Clock' 'DEBUG hud tick n=120 poll avg 20 max 90'
     return $l
@@ -56,16 +57,21 @@ foreach ($p in 'match1', 'match2') {
     $match += L 'ClockDriver' "OK CHANGED $p 10:05 -> 10:08 within 5 s, the sky says 10:08"
 }
 $match += L 'ClockDriver' 'OK CHANGED match1 10:08 -> 11:09 within 5 s, the sky says 11:09'
+$match += L 'ClockDriver' 'IDLE match2 200 s in the match from here'
+$match += L 'ClockDriver' 'OK ONE match2-idle exactly one clock widget (found 1)'
+$match += L 'ClockDriver' "OK MATCHES match2-idle text 12:00 matches the sky's 12:01 (H/M/S 12:1)"
 $match += End-Log
 Expect $match 'match' 0 'match: passes' 'All checks passed'
 Expect ($match | Where-Object { $_ -notmatch 'OK CORNER match2' }) 'match' 1 'match: missing CORNER match2 fails'
+Expect ($match | Where-Object { $_ -notmatch 'match2-idle' }) 'match' 1 'match: missing idle check fails'
 Expect ($match + (L 'Clock' 'WARN tick failed: boom')) 'match' 1 'match: a clock WARN fails'
 Expect ($match + (L 'Clock' 'WARN hud slow tick 1.4 ms (attach); HUD event: attached')) 'match' 0 "match: core's slow tick on a HUD event is soft" 'soft check'
 Expect ($match + (L 'Clock' 'WARN hud slow tick 1.4 ms; steady state')) 'match' 1 'match: a steady-state slow tick fails'
 Expect ($match + (U 'stack traceback:')) 'match' 1 'match: a traceback fails'
 Expect ($match + (L 'ClockDriver' 'FAIL MATCHES match1 text 10:05')) 'match' 1 'match: a driver FAIL fails'
-Expect (($match | Where-Object { $_ -notmatch 'DEBUG TICK' }) + (L 'Clock' 'DEBUG TICK n=60 avg 150.0 max 400 us')) 'match' 1 'match: a 0.15 ms average tick fails' 'read tick cost'
-Expect ($match + (L 'Clock' 'DEBUG TICK n=60 avg 20.0 max 1500 us')) 'match' 0 'match: one slow tick is a warning' 'warn: a read tick took 1500 us'
+Expect (($match | Where-Object { $_ -notmatch 'DEBUG TICK' }) + (L 'Clock' 'DEBUG TICK n=60 avg 150.0 max 400 us')) 'match' 0 'match: a slow tick with DEBUG lines on is only a warning' 'judged in the cost scenario'
+Expect ($match | Where-Object { $_ -notmatch 'VERIFY' }) 'match' 1 'match: no VERIFY fails'
+Expect ($match + (L 'Clock' 'DEBUG TICK n=60 avg 20.0 max 1500 us (read 5.0, set 5.0 over 1 changes, log 0.0)')) 'match' 0 'match: one slow tick is a warning' 'warn: a read tick took 1500 us'
 Expect ($match | Where-Object { $_ -notmatch 'DEBUG TICK' }) 'match' 1 'match: no TICK line fails'
 Expect ($match + (L 'Clock' 'READY updateEvery=1 element=clock.time')) 'match' 1 'match: two READY lines fail'
 # READY before CONNECT ok.
@@ -74,6 +80,21 @@ $ic = $swapped.FindIndex({ param($l) $l -match '\[Clock\] CONNECT ok' }); $ir = 
 $tmpL = $swapped[$ic]; $swapped[$ic] = $swapped[$ir]; $swapped[$ir] = $tmpL
 Expect $swapped.ToArray() 'match' 1 'match: READY before CONNECT ok fails' 'READY comes after CONNECT ok'
 Expect ($match + (L 'Clock' 'DEBUG SHOW 24:10')) 'match' 1 'match: an hour of 24 fails'
+
+# ---------------------------------------------------------------- cost (the hard tick-cost check)
+function Cost-Log([string[]] $ticks) {
+    $l = (Start-Log) + @((L 'ClockDriver' 'SCENARIO cost'), (L 'Clock' 'CONNECT ok Nucleus 0.2.0 (pong 0.2.0 boot=1)'),
+        (L 'Clock' 'READY updateEvery=1 element=clock.time'), (L 'Clock' "ui attach 'clock.time' created /Engine/Transient.WBP_NucleusText_C_1 (HUD appeared)"),
+        (L 'Clock' 'VISIBLE 06:30 (updateEvery=1)'), (L 'ClockDriver' "COST match1 all of time.read's calls avg 17.4 us (n=200)"),
+        (L 'ClockDriver' 'IDLE match1 200 s in the match from here'))
+    foreach ($t in $ticks) { $l += L 'Clock' $t }
+    return $l + (End-Log)
+}
+$first = 'TICK n=60 avg 900.0 max 3000 us (read 160.0, set 20.0 over 30 changes, log 0.0)' # menu and travel: skipped
+Expect (Cost-Log @($first, 'TICK n=60 avg 80.0 max 300 us (read 30.0, set 45.0 over 60 changes, log 0.0)')) 'cost' 0 'cost: 0.08 ms passes, the first window skipped' 'avg 80.0 us without'
+Expect (Cost-Log @($first, 'TICK n=60 avg 120.0 max 300 us (read 30.0, set 45.0 over 60 changes, log 0.0)')) 'cost' 1 'cost: 0.12 ms fails' 'FAIL: read tick cost'
+Expect ((Cost-Log @($first, 'TICK n=60 avg 80.0 max 300 us (read 30.0, set 45.0 over 60 changes, log 0.0)')) + (L 'Clock' 'DEBUG SHOW 06:31')) 'cost' 1 'cost: DEBUG lines present fails'
+Expect (Cost-Log @()) 'cost' 1 'cost: no TICK line fails'
 
 # ---------------------------------------------------------------- step5
 $step5 = (Start-Log) + (Running 5 'step5') + @((L 'ClockDriver' 'FREEZE match1 Animate Time of Day true -> false'), (L 'ClockDriver' 'OK CORNER match1 clock in the top-right corner'))

@@ -23,7 +23,7 @@
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure')]
+    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost')]
     [string] $Scenario = 'match',
     [int] $TimeoutSec = 0  # 0: per scenario (match 720, measure 1200, others 480)
 )

@@ -23,7 +23,7 @@ function LoopAsync() error("driver must not use LoopAsync") end
 ModRef = { SetSharedVariable = function(_, k, v) shared[k] = v end, GetSharedVariable = function(_, k) return shared[k] end }
 
 local scenarioFile = DIR .. "/scenario.txt"
-for _, sc in ipairs({ "match", "step5", "rebuild", "no-core", "old-core", "measure" }) do
+for _, sc in ipairs({ "match", "step5", "rebuild", "no-core", "old-core", "measure", "cost" }) do
     printed, loops = {}, {}
     local f = assert(io.open(scenarioFile, "w")); f:write(sc); f:close()
     local okL, err = pcall(dofile, MAIN)

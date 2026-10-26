@@ -23,12 +23,12 @@ local function newSky(path, tod)
     s["Time Of Day to H/M/S"] = function(self, t, oh, om)
         local x = (t % 2400) / 100
         oh.Hour = math.floor(x)
-        om.Minute = math.floor((x - math.floor(x)) * 60 + 1e-9)
+        om.Minute = math.floor((x - math.floor(x)) * 60)
     end
     W.objects[path] = s
     return s
 end
-local function tod(h, m) return h * 100 + m * 100 / 60 end
+local function tod(h, m) return h * 100 + (m + 0.5) * 100 / 60 end -- mid-minute, as a live sky almost always is
 
 local INVALID = { IsValid = function() return false end }
 function FindFirstOf() W.finds = W.finds + 1; return W.sky or INVALID end
@@ -214,7 +214,7 @@ do
     i = #U.calls
     tick(2)
     eq(#callsSince(U, i, "set"), 0, "same minute: no set")
-    eq(#callsSince(U, i, "setVisible"), 2, "same minute: setVisible(true) each tick")
+    eq(#callsSince(U, i, "setVisible"), 0, "same minute: no repeated setVisible(true)")
 
     -- The next minute: one set.
     W.sky["Time of Day"] = tod(10, 8)
@@ -254,20 +254,33 @@ do
     tick()
     eq(W.finds, f0 + 1, "then by path again")
 
-    -- A read error (the conversion function gone after a patch): hidden, one WARN, however many ticks.
-    W.sky["Time Of Day to H/M/S"] = nil
+    -- The conversion is checked against the sky's function once per sky: one VERIFY line per match.
+    eq(#lines("^%[Clock%] VERIFY "), 3, "one VERIFY line per sky and per map change (two skies, one LoadMap)")
+
+    -- A read error (Time of Day gone after a patch): hidden, one WARN, however many ticks.
+    W.sky["Time of Day"] = nil
     i = #U.calls
     tick(5)
     v = callsSince(U, i, "setVisible")
     ok(#v == 5 and v[1] == false, "read error: hidden")
-    eq(#lines("WARN time unreadable %('Time Of Day to H/M/S' is missing"), 1, "read error: logged once")
+    eq(#lines("WARN time unreadable %('Time of Day' is not a number"), 1, "read error: logged once")
     eq(#callsSince(U, i, "set"), 0, "read error: never a wrong time")
     -- It reads again: shown again.
-    W.sky["Time Of Day to H/M/S"] = function(self, t, oh, om) oh.Hour = 11; om.Minute = 0 end
+    W.sky["Time of Day"] = tod(11, 0)
     i = #U.calls
     tick()
     sets = callsSince(U, i, "set")
     ok(#sets == 1 and sets[1] == "11:00", "recovers: shows the time again", sets[1])
+
+    -- The sky's function disagrees with Lua's conversion on a new sky: one WARN, and its answer is shown.
+    W.loadMapHooks[1]()
+    W.sky["Time Of Day to H/M/S"] = function(self, t, oh, om) oh.Hour = 11; om.Minute = 2 end
+    i = #U.calls
+    tick()
+    sets = callsSince(U, i, "set")
+    ok(#sets == 1 and sets[1] == "11:02", "disagreement: the function's answer", sets[1])
+    eq(#lines("WARN Lua's conversion of .* using the sky's function from now on"), 1, "disagreement: one WARN")
+    W.sky["Time Of Day to H/M/S"] = function(self, t, oh, om) oh.Hour = 11; om.Minute = 0 end
 
     -- A tick that throws inside core (set raising): caught, one WARN, hidden, no error escapes the loop.
     U.failSet = true
@@ -279,6 +292,33 @@ do
     U.failSet = false
     tick()
     eq(U.els[next(U.els)].text, "11:01", "after the throw: shows again")
+end
+
+do -- With core's weak handles: the sky is kept as a handle, re-found by Deref; freed and re-found on a map change.
+    boot()
+    local core = newCore()
+    local handles, nextH, refs, derefs, freed = {}, 0, 0, 0, 0
+    core.ref = function(o) refs = refs + 1; nextH = nextH + 1; handles[nextH] = o; return nextH end
+    core.deref = function(h) derefs = derefs + 1; local o = handles[h]; return (o and o.alive) and o or nil end
+    core.free = function(h) freed = freed + 1; handles[h] = nil end
+    connect(core)
+    W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(8, 0))
+    local static0 = 0
+    local realSFO = StaticFindObject
+    StaticFindObject = function(p) static0 = static0 + 1; return realSFO(p) end
+    tick(); tick(); tick()
+    ok(refs == 1 and derefs == 2 and static0 == 0 and W.finds == 1, "handles: one FindFirstOf and Ref, then Deref; no StaticFindObject",
+        ("refs=%d derefs=%d static=%d finds=%d"):format(refs, derefs, static0, W.finds))
+    W.loadMapHooks[1]()
+    ok(freed == 1, "handles: a map change frees the handle")
+    W.sky.alive = false
+    W.sky = newSky("/Game/Maps/Y.Y:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(9, 0))
+    tick()
+    ok(refs == 2 and W.finds == 2 and core.ui.els[next(core.ui.els)].text == "09:00", "handles: the new world's sky is found and shown")
+    W.sky.alive = false; W.sky = nil
+    tick()
+    ok(freed == 2 and #lines("HIDDEN no sky") == 1, "handles: a dead sky's handle is freed and the clock hides")
+    StaticFindObject = realSFO
 end
 
 do -- updateEvery = 5: multiples of 5, changes only at multiples.
@@ -302,13 +342,19 @@ do -- Debug lines: SHOW per change and a TICK cost line every 60 ticks, only wit
     W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(9, 5))
     tick(60)
     eq(#lines("^%[Clock%] DEBUG SHOW 09:05$"), 1, "debug: one SHOW line per shown value")
-    local cost = lines("^%[Clock%] DEBUG TICK n=60 avg [%d%.]+ max %d+ us$")
+    local cost = lines("^%[Clock%] DEBUG TICK n=60 avg [%d%.]+ max %d+ us %(read [%d%.]+, set [%d%.]+ over 1 changes, log [%d%.]+%)$")
     eq(#cost, 1, "debug: one TICK cost line per 60 ticks")
     boot()
     connect(newCore())
     W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(9, 5))
     tick(60)
     eq(#lines("DEBUG"), 0, "no debug lines by default")
+    boot{ settings = "return { updateEvery = 1, profile = true }" }
+    connect(newCore())
+    W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(9, 5))
+    tick(60)
+    eq(#lines("^%[Clock%] TICK n=60 avg [%d%.]+ max %d+ us %(read 0%.0, set 0%.0 over 1 changes, log 0%.0%)$"), 1, "profile: one info TICK line, whole tick only")
+    eq(#lines("DEBUG"), 0, "profile: no DEBUG lines")
     boot{ settings = "return { updateEvery = 1, debug = true }" }
     connect(newCore{ clock = false })
     W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(9, 5))
