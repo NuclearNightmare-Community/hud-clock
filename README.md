@@ -1,0 +1,106 @@
+# Clock
+
+A Nuclear Nightmare mod that shows the in-game time as `HH:MM` (24-hour, the Journal map's format) in the HUD's top-right corner during a match, so you don't have to open the Journal to see it. It's the first mod built on **Nucleus** (core): it connects to core and puts its text on the HUD through core's UI helpers. Spec: `_bmad-output/specs/spec-clock-v1/` in the workspace.
+
+- Scope `client`: each player runs it for themselves. It reads the time from the game's own sky (the replicated copy on a client), sends nothing over the network and reads nothing from other players.
+- Version 0.1.0, built for game V8.1.2 (build 26193463) and UE4SS `v3.0.1-1181-g83330635`. Needs Nucleus `^0.2.0` (0.2.x, the first core with the UI helpers).
+
+## Install
+
+Nucleus must be installed in the dev copy first (its own `deploy.ps1`). Then, from this repo (from a worktree, pass the main checkout's instance path):
+
+```powershell
+./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463
+./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -UpdateEvery 5
+./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Remove
+```
+
+`deploy.ps1` refuses, with one line and exit code 1, when Nucleus isn't installed in the copy, is disabled in `mods.txt`, or its installed `mod.json` version doesn't satisfy `dependsOn` (`^0.2.0`). Otherwise it copies `mod.json` and `Scripts/` to `Mods/Clock/`, generates `Scripts/settings.lua` from `mod.json`'s setting defaults, and puts `Clock : 1` in `mods.txt` right below Nucleus's line and above `Keybinds : 1` (it moves the line there if it was elsewhere). It never bundles core's files and never writes outside `Mods/Clock`, `Mods/ClockDriver` and those `mods.txt` lines. `-Remove` takes all of that out again; `mods.txt` keeps its exact bytes otherwise.
+
+Launch only with the workspace's `tools/launch.ps1 -Instance <copy>`.
+
+## Settings
+
+| Setting | Type | Default | Range | Changeable | Label |
+|---|---|---|---|---|---|
+| `updateEvery` | int | 1 | 1–60 | anytime | Update every N game minutes |
+
+The clock shows the minute rounded down to a multiple of N (10:07 shows 10:05 with N = 5; N = 60 shows whole hours) and changes the text only when that value changes. Until core's settings service exists, the value comes from `Scripts/settings.lua`, which `deploy.ps1` generates from `mod.json` (`-UpdateEvery` overrides it). A missing or invalid `settings.lua` gives one `WARN` and N = 1.
+
+## How it works
+
+- `Scripts/main.lua`: the dependent bootstrap from core's `api-contract.md`, then `connect{ mod = "Clock", need = "0.2.0" }`. In `onReady` it creates one text element, `clock.time`, at `{ host = "hud", corner = "top-right" }`, hidden, and starts a 1,000 ms game-thread loop (`LoopInGameThreadWithDelay`). Each tick reads the time; when the shown value changes it sets the text, then shows the element. With no sky it hides the element and forgets the last value, so a new match shows its time at once. Core keeps the element attached through every HUD rebuild.
+- `Scripts/time.lua`: `read()` finds the live `Ultra_Dynamic_Sky_C`, reads `Time of Day` and converts it with the sky's own `Time Of Day to H/M/S`, the same conversion the Journal map uses. It keeps only the sky's path between calls (re-found with `StaticFindObject`; `FindFirstOf` only when the path stops resolving or after a map change). `format` and `boundary` are pure: zero-padded `HH:MM`, hours past 23 wrap to 00.
+- If core is missing, disabled, failed or too old, the log has exactly one `[Clock]` line naming the cause (core's `connect` composes it; the bootstrap writes the "not installed" one) and the clock does nothing else.
+
+Log lines (`UE4SS.log`): `[Clock] CONNECT ok ...`, `[Clock] READY updateEvery=<n> element=clock.time`, `[Clock] VISIBLE <HH:MM>` when the clock appears, `[Clock] HIDDEN no sky` when it goes away, and one `WARN` per distinct read error (the clock hides rather than show a wrong time). With `deploy.ps1 -Test`, `settings.lua` also turns on DEBUG lines: `DEBUG SHOW <HH:MM>` for every shown value and `DEBUG TICK n=60 avg <us> max <us>` for the read-tick cost.
+
+## Tests
+
+### Unit tests (no game)
+
+```powershell
+./test.ps1                      # or: ./check.ps1 -Scenario unit
+```
+
+Lua tests run with any Lua 5.3/5.4 on PATH (MiKTeX's `texlua.exe` is one): `test/unit/time_test.lua` (formatting, rounding, boundaries over every minute of the day for several N, `read()` against a fake sky), `test/unit/main_test.lua` (the bootstrap, settings and the glue against a fake core and sky: create hidden, set before show, reset outside a match, one log line per failure), `test/unit/driver_test.lua` (the driver loads and ticks in every scenario). PowerShell tests: `test/unit/deploy_test.ps1` (caret ranges, `mods.txt` editing, `settings.lua`, and `deploy.ps1` end to end against a fake instance in a temp folder) and `test/unit/check_test.ps1` (each scenario's patterns against synthetic logs, passing and failing).
+
+### Scenarios (in game, unattended)
+
+`run.ps1` deploys with the test driver, launches through `tools/launch.ps1`, presses Enter at touchdown (posted to the game window only), waits for the driver's `END` line (or a crash or the time limit), closes only the game under that instance, keeps the log as `dumps/<copy>/clock/<scenario>.log` and runs `check.ps1` on it. Nucleus must be installed in the copy. Steam must be running, and nothing else may be running the game.
+
+```powershell
+$copy = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'
+./run.ps1 -Instance $copy -Scenario match      # two matches with the menu between; time forced forward on the host
+./run.ps1 -Instance $copy -Scenario step5      # updateEvery = 5; frozen sky set to chosen minutes
+./run.ps1 -Instance $copy -Scenario rebuild    # RemoveAllWidgets and re-add the HUD mid-match
+./run.ps1 -Instance $copy -Scenario no-core    # Nucleus moved aside: deploy refuses; forced, one [Clock] line, no widget
+./run.ps1 -Instance $copy -Scenario old-core   # Nucleus mod.json set to 0.1.0: deploy refuses; forced, one [Clock] line
+./check.ps1 -Log <a kept log> -Scenario match  # judge a kept log again
+```
+
+| Scenario | What it proves |
+|---|---|
+| `match` | Drawn in match 1, one widget, `HH:MM` equal to the sky's own conversion, top-right with the 16-unit gap; changes after the host moves `Time of Day` forward (+3 and +61 minutes); not drawn at the menu; the same again in match 2. Every shown value is valid; the read tick averages under 0.1 ms; each match's sky belongs to its own world |
+| `step5` | With `updateEvery = 5` and the sky frozen (`Animate Time of Day` off): 10 chosen times each show the value rounded down to 5; every logged value is a multiple of 5 |
+| `rebuild` | After `RemoveAllWidgets` and `AddToViewport`, the clock is drawn again, reused, one widget |
+| `no-core` | `deploy.ps1` refuses in one line; forced, the log has exactly one `[Clock]` line ("Nucleus is not installed. Clock will not run.") and no clock widget |
+| `old-core` | `deploy.ps1` refuses naming both versions; forced, exactly one `[Clock]` line: "Nucleus 0.1.0 is not compatible; Clock needs 0.2.0 (^ rules). ..." |
+
+`no-core` and `old-core` put Nucleus back afterwards (also after a crash or Ctrl+C, and at the start of the next run if one was killed); the backup lives in `ue4ss/_clock-test-backup/` meanwhile. For `old-core` the driver publishes the claimed version as core's runtime version (`nucleus.version`), because a real 0.1.0 core has no UI helpers and can't be built from today's source.
+
+The driver (`test/ClockDriver/`, installed as `Mods/ClockDriver` between Nucleus and Clock, only with `deploy.ps1 -Test`) is plain UE4SS Lua and never ships. It can't reach the clock's Lua state, so it judges what's on the HUD: the clock's widget found in the live `InventoryUI_C` canvas by core's tag (`nucleus:Clock:clock.time`), its text and visibility, and the HUD's visibility.
+
+### Measuring how the game advances time (story 2, part A)
+
+`./run.ps1 -Instance $copy -Scenario measure` (about 10 minutes, as host). The driver logs, once a second for 2 real minutes at each `Time Speed` (Fast 1.5, Normal 1.0, Long 0.5), `Time of Day`, the sky's H/M/S and the Journal map's own text (`MapWidget_C.GetText_0`, when the widget exists); every change of the sky's `Event Minute` (what UDS's `Every Minute` broadcasts, from `Check for Time Event Dispatchers`); 30 s across the wrap at 2400; and which skies exist after each travel. `check.ps1 -Scenario measure` prints real seconds per game minute per speed, jumps, and how many map samples differed from H/M/S. To answer the four questions:
+
+1. **Seconds per game minute** at each speed: the `MEASURE <speed>:` summary lines.
+2. **Does `Every Minute` fire once per game minute?** Compare the `MEASURE minute-event` lines with the samples: one per minute, no bursts. (Host only; a client needs a second machine.)
+3. **Map text vs H/M/S:** `differing=0` in the summaries. If the map widget doesn't exist until the Journal is opened (`map=n/a`), open the Journal by hand during a hand run and compare with `[Clock] DEBUG SHOW`.
+4. **Jumps and the wrap:** `jumps=` in the summaries and the `MEASURE wrap` first/last lines. Sleeping or skipping (if the game has them) needs a hand run.
+
+Write the answers, with the log lines, into the workspace's `docs/game-internals.md` ("In-game time"). The clock polls once a second; switch to the minute event only if question 2 shows it reliable on host and client.
+
+### Hand check (about 5 minutes)
+
+Deploy without `-Test` (`./deploy.ps1 -Instance $copy`), launch with `tools/launch.ps1 -Instance $copy`, then:
+
+1. Start a match. The clock is top-right, clear of the HUD, and the same as the Journal map.
+2. Die and respawn. The clock comes back.
+3. Return to the menu. No clock there.
+4. Start another match. The clock is back, with that match's time.
+5. Optional: set `updateEvery` to 5 (`./deploy.ps1 -Instance $copy -UpdateEvery 5`), relaunch, and watch it step.
+
+Afterwards `./check.ps1 -Instance $copy -Scenario hand` checks the log: connected, `READY`, a time shown, no error. Record the result in story 4 (`_bmad-output/specs/spec-clock-v1/stories/story-4-scenarios-and-hand-check.md`).
+
+## Layout
+
+| Path | What |
+|---|---|
+| `mod.json` | The manifest (id, version, scope, game build, UE4SS, `dependsOn`, `settings`) |
+| `Scripts/main.lua`, `Scripts/time.lua` | The mod (what ships) |
+| `deploy.ps1`, `deploy-lib.ps1` | Install/remove; the lib holds the caret check, `mods.txt` editing and `settings.lua` generation |
+| `check.ps1`, `run.ps1`, `test.ps1` | Judge a log, run a scenario, run the unit tests |
+| `test/ClockDriver/` | The test driver (never shipped) |
+| `test/unit/` | Unit tests |
