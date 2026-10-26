@@ -56,7 +56,10 @@ $running = @(
     "\[$C\] CONNECT ok $K \d+\.\d+\.\d+ "
     "#1|\[$C\] READY updateEvery=$every element=clock\.time\s*$"
     "\[$C\] VISIBLE \d\d:\d\d \(updateEvery=$every\)"
-    "\[$C\] ui attach (.*, )?'clock\.time' (created|reused) "
+    # Core logs attaches at DEBUG since Nucleus cbbca96 (INFO only for an element left pending), so the line shows only
+    # with the clock's DEBUG lines on (deploy -Test); soft. A pending clock element would be an INFO line: never.
+    "?\[$C\] (DEBUG )?ui attach (.*, )?'clock\.time' (created|reused) "
+    "!\[$C\] ui attach left .*'clock\.time'"
     "!\[$C\] ERROR"
     # Core's UI helpers log with the clock's tag; a slow tick while handling a HUD event is core's to judge (soft).
     "!\[$C\] WARN (?!hud slow tick .*(HUD event|steady state, a Lua GC step ran inside it))"
@@ -93,7 +96,7 @@ $expect = @{
         "\[$D\] REBUILD match1 AddToViewport"
         "\[$D\] OK ONE match1-rebuilt exactly one clock widget \(found 1\)"
         "\[$D\] OK CORNER match1-rebuilt "
-        "\[$C\] ui attach (.*, )?'clock\.time' reused .*\(HUD back in the viewport\)"
+        "\[$C\] (DEBUG )?ui attach (.*, )?'clock\.time' reused .*\(HUD back in the viewport\)"
     )
     'no-core' = @(
         "#1|\[$C\] "

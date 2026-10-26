@@ -95,6 +95,8 @@ Expect (Cost-Log @($first, 'TICK n=60 avg 80.0 max 300 us (read 30.0, set 45.0 o
 Expect (Cost-Log @($first, 'TICK n=60 avg 120.0 max 300 us (read 30.0, set 45.0 over 60 changes, log 0.0)')) 'cost' 1 'cost: 0.12 ms fails' 'FAIL: read tick cost'
 Expect ((Cost-Log @($first, 'TICK n=60 avg 80.0 max 300 us (read 30.0, set 45.0 over 60 changes, log 0.0)')) + (L 'Clock' 'DEBUG SHOW 06:31')) 'cost' 1 'cost: DEBUG lines present fails'
 Expect (Cost-Log @()) 'cost' 1 'cost: no TICK line fails'
+Expect ((Cost-Log @($first, 'TICK n=60 avg 80.0 max 300 us (read 0.0, set 0.0 over 60 changes, log 0.0)')) | Where-Object { $_ -notmatch 'ui attach' }) 'cost' 0 'cost: no attach line (DEBUG-only in core) is soft' 'warn: .*ui attach'
+Expect ((Cost-Log @($first, 'TICK n=60 avg 80.0 max 300 us (read 0.0, set 0.0 over 60 changes, log 0.0)')) + (L 'Clock' "ui attach left 'clock.time' pending, retried in 4 ticks (HUD appeared)")) 'cost' 1 'cost: the clock left pending fails'
 
 # ---------------------------------------------------------------- step5
 $step5 = (Start-Log) + (Running 5 'step5') + @((L 'ClockDriver' 'FREEZE match1 Animate Time of Day true -> false'), (L 'ClockDriver' 'OK CORNER match1 clock in the top-right corner'))
@@ -108,9 +110,10 @@ Expect ($step5 | Where-Object { $_ -notmatch 'OK STEP5 10 ' }) 'step5' 1 'step5:
 # ---------------------------------------------------------------- rebuild
 $rebuild = (Start-Log) + (Running 1 'rebuild') + @(
     (L 'ClockDriver' 'REBUILD match1 RemoveAllWidgets (HUD /Engine/Transient.InventoryUI_C_1)'), (L 'ClockDriver' 'REBUILD match1 AddToViewport(0)'),
-    (L 'Clock' "ui attach 'clock.time' reused /Engine/Transient.WBP_NucleusText_C_1 (HUD back in the viewport)"),
+    (L 'Clock' "DEBUG ui attach 'clock.time' reused /Engine/Transient.WBP_NucleusText_C_1 (HUD back in the viewport)"),
     (L 'ClockDriver' 'OK ONE match1-rebuilt exactly one clock widget (found 1)'), (L 'ClockDriver' 'OK CORNER match1-rebuilt clock in the top-right corner')) + (End-Log)
-Expect $rebuild 'rebuild' 0 'rebuild: passes' 'All checks passed'
+Expect $rebuild 'rebuild' 0 'rebuild: passes (DEBUG attach line, core cbbca96)' 'All checks passed'
+Expect ($rebuild -replace 'DEBUG ui attach', 'ui attach') 'rebuild' 0 'rebuild: an INFO attach line (older core) passes too' 'All checks passed'
 Expect ($rebuild | Where-Object { $_ -notmatch "reused" }) 'rebuild' 1 'rebuild: no reuse fails'
 Expect ($rebuild + (L 'Clock' "WARN text 'clock.time': removed 1 duplicate widget(s) from the HUD canvas")) 'rebuild' 1 'rebuild: a duplicate fails'
 
