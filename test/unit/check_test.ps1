@@ -16,14 +16,14 @@ $script:t = 0
 function L([string] $tag, [string] $msg) { $script:t++; "[2026-10-25 01:00:{0:D2}.{1:D7}] [Lua] [$tag] $msg" -f [int]($script:t / 1000 % 60), $script:t }
 function U([string] $msg) { $script:t++; "[2026-10-25 01:00:00.{0:D7}] $msg" -f $script:t }
 
-function Run([string[]] $log, [string] $scenario) {
+function Run([string[]] $log, [string] $scenario, [string] $target = 'host') {
     $p = Join-Path $tmp "$scenario-$([guid]::NewGuid().ToString('N').Substring(0, 6)).log"
     Set-Content $p $log
-    $out = & pwsh -NoProfile -NonInteractive -File $check -Log $p -Scenario $scenario 2>&1 | Out-String
+    $out = & pwsh -NoProfile -NonInteractive -File $check -Log $p -Scenario $scenario -Target $target 2>&1 | Out-String
     return @{ Code = $LASTEXITCODE; Out = $out }
 }
-function Expect([string[]] $log, [string] $scenario, [int] $code, [string] $name, [string] $mustSay) {
-    $r = Run $log $scenario
+function Expect([string[]] $log, [string] $scenario, [int] $code, [string] $name, [string] $mustSay, [string] $target = 'host') {
+    $r = Run $log $scenario $target
     $ok = $r.Code -eq $code -and (-not $mustSay -or $r.Out -match $mustSay)
     if ($ok) { $script:passed++ } else { $script:failed++; Write-Host "FAIL $name (exit $($r.Code), want $code)"; Write-Host ($r.Out -split "`n" | Where-Object { $_ -match 'FAIL|warn' } | Out-String) }
 }
@@ -67,6 +67,13 @@ Expect ($match | Where-Object { $_ -notmatch 'match2-idle' }) 'match' 1 'match: 
 Expect ($match + (L 'Clock' 'WARN tick failed: boom')) 'match' 1 'match: a clock WARN fails'
 Expect ($match + (L 'Clock' 'WARN hud slow tick 1.4 ms (attach); HUD event: attached')) 'match' 0 "match: core's slow tick on a HUD event is soft" 'soft check'
 Expect ($match + (L 'Clock' 'WARN hud slow tick 1.4 ms; steady state')) 'match' 1 'match: a steady-state slow tick fails'
+# -Target vm (run.ps1 -Target vm): timing inside functional scenarios is soft, everything else as on the host.
+Expect $match 'match' 0 'vm match: passes' 'All checks passed' 'vm'
+Expect ($match + (L 'Clock' 'WARN hud slow tick 1.4 ms (steady state)')) 'match' 0 'vm match: a steady-state slow tick is soft' 'warn: .*steady state' 'vm'
+Expect ($match + (L 'Clock' 'WARN tick failed: boom')) 'match' 1 'vm match: a clock WARN still fails' '' 'vm'
+Expect ($match | Where-Object { $_ -notmatch 'OK CORNER match2' }) 'match' 1 'vm match: missing CORNER match2 still fails' '' 'vm'
+Expect $match 'cost' 1 'vm cost: refused (host-only)' 'valid only on the host' 'vm'
+Expect $match 'measure' 1 'vm measure: refused (host-only)' 'valid only on the host' 'vm'
 Expect ($match + (U 'stack traceback:')) 'match' 1 'match: a traceback fails'
 Expect ($match + (L 'ClockDriver' 'FAIL MATCHES match1 text 10:05')) 'match' 1 'match: a driver FAIL fails'
 Expect (($match | Where-Object { $_ -notmatch 'DEBUG TICK' }) + (L 'Clock' 'DEBUG TICK n=60 avg 150.0 max 400 us')) 'match' 0 'match: a slow tick with DEBUG lines on is only a warning' 'judged in the cost scenario'
@@ -121,6 +128,7 @@ Expect ($rebuild + (L 'Clock' "WARN text 'clock.time': removed 1 duplicate widge
 $noCore = @((U "Starting Lua mod 'ClockDriver'"), (L 'ClockDriver' 'SCENARIO no-core'), (U "Starting Lua mod 'Clock'"),
     (L 'Clock' 'Nucleus is not installed. Clock will not run.'), (L 'ClockDriver' 'OK NOCLOCK match1 no clock widget on the HUD for 15 s (max seen 0)')) + (End-Log)
 Expect $noCore 'no-core' 0 'no-core: passes' 'All checks passed'
+Expect $noCore 'no-core' 0 'vm no-core: passes' 'All checks passed' 'vm'
 Expect ($noCore + (L 'Clock' 'READY updateEvery=1 element=clock.time')) 'no-core' 1 'no-core: a second [Clock] line fails'
 Expect ($noCore | Where-Object { $_ -notmatch 'NOCLOCK' }) 'no-core' 1 'no-core: no NOCLOCK fails'
 

@@ -18,30 +18,45 @@
   Keeps the log as <workspace>/dumps/<copy>/clock/<scenario>.log (ignored by git) and runs check.ps1 on it.
   Core must already be installed (Nucleus's own deploy.ps1). Steam must be running. Don't type into the game while
   it runs.
+  -Target vm runs the scenario in the Hyper-V VM NNB instead (tools/vm/vm-sp.ps1, README "Tests in the VM"): Nucleus
+  from the host's mods/Nucleus/build/package (its own deploy.ps1 -Staged), the clock and the driver (deploy.ps1
+  -Staged, with the same refusal checks for no-core and old-core) go into the VM's copy of the same build, the VM's
+  game is launched, Enter is pressed there with tools/vm/vm-key.ps1, and the VM copy is put back as it was
+  afterwards. It never builds and never touches the host's game copy or a host game, so it can run while someone
+  plays on the host. The log is kept as <scenario>.vm.log and judged with check.ps1 -Target vm. measure and cost
+  (timing) are host-only.
 .EXAMPLE
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario match
+  ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario no-core -Target vm
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost')]
     [string] $Scenario = 'match',
-    [int] $TimeoutSec = 0  # 0: per scenario (match 720, measure 1200, others 480)
+    [int] $TimeoutSec = 0, # 0: per scenario (match 720, measure 1200, others 480); x1.5 in the VM
+    [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
 $ErrorActionPreference = 'Stop'
-if ($TimeoutSec -le 0) { $TimeoutSec = switch ($Scenario) { 'match' { 720 } 'measure' { 1200 } default { 480 } } }
+$hostTimeout = switch ($Scenario) { 'match' { 720 } 'measure' { 1200 } default { 480 } }
+if ($TimeoutSec -le 0 -and $Target -eq 'host') { $TimeoutSec = $hostTimeout }
 $CoreName = 'Nucleus'
 $here     = $PSScriptRoot
 $name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).name
 $driver   = "${name}Driver"
 $inst     = (Resolve-Path $Instance).Path
 $root     = Split-Path (Split-Path $inst)
-$ue4ss    = Join-Path $inst 'NuclearNightmare\Binaries\Win64\ue4ss'
-$modsDir  = Join-Path $ue4ss 'Mods'
-$modsTxt  = Join-Path $modsDir 'mods.txt'
-$log      = Join-Path $ue4ss 'UE4SS.log'
-$scripts  = Join-Path $modsDir "$driver\Scripts"
-$backup   = Join-Path $ue4ss '_clock-test-backup'
 $outDir   = Join-Path $root "dumps\$(Split-Path $inst -Leaf)\$($name.ToLowerInvariant())"
+# Where deploy.ps1 and Break-Core/Restore-Core work: the instance, or with -Target vm the host-side staging folder.
+function Set-DeployTarget([string] $instance) {
+    $script:deployInst = $instance
+    $script:ue4ss    = Join-Path $instance 'NuclearNightmare\Binaries\Win64\ue4ss'
+    $script:modsDir  = Join-Path $script:ue4ss 'Mods'
+    $script:modsTxt  = Join-Path $script:modsDir 'mods.txt'
+    $script:log      = Join-Path $script:ue4ss 'UE4SS.log'
+    $script:scripts  = Join-Path $script:modsDir "$driver\Scripts"
+    $script:backup   = Join-Path $script:ue4ss '_clock-test-backup'
+}
+Set-DeployTarget $inst
 $exeName  = 'NuclearNightmare-Win64-Shipping'
 New-Item -ItemType Directory -Force $outDir | Out-Null
 
@@ -70,7 +85,8 @@ function Invoke-Request([string] $cmd) {
 }
 # deploy.ps1 ends with exit 1 when it refuses, so it always runs in its own pwsh.
 function Invoke-Deploy([string[]] $a) {
-    $out = & pwsh -NoProfile -NonInteractive -File (Join-Path $here 'deploy.ps1') -Instance $inst @a 2>&1 | Out-String
+    if ($Target -eq 'vm') { $a += '-Staged' }
+    $out = & pwsh -NoProfile -NonInteractive -File (Join-Path $here 'deploy.ps1') -Instance $script:deployInst @a 2>&1 | Out-String
     return @{ Code = $LASTEXITCODE; Out = $out.Trim() }
 }
 
@@ -111,14 +127,9 @@ function Break-Core {
     }
 }
 
-if (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue) { throw 'Nuclear Nightmare is already running (a dev copy or the real game); not launching.' }
-Restore-Core # a run that was killed may have left core broken
-if (-not (Test-Path (Join-Path $modsDir "$CoreName\mod.json"))) { throw "$CoreName is not installed in $modsDir; install it with its own deploy.ps1 first." }
-
-$runFailures = @()
-$sw = [Diagnostics.Stopwatch]::StartNew()
-$result = 'not started'
-try {
+# The scenario's deploy: no-core and old-core first break core and check that deploy.ps1 refuses without -Force.
+$script:runFailures = @()
+function Deploy-Scenario {
     if ($Scenario -in 'no-core', 'old-core') {
         Break-Core
         $r = Invoke-Deploy @()
@@ -127,7 +138,7 @@ try {
             Write-Host "ok:   deploy.ps1 refused without -Force: $($r.Out)"
         } else {
             Write-Host "FAIL: deploy.ps1 should refuse with one line (exit $($r.Code)): $($r.Out)"
-            $runFailures += 'deploy refusal'
+            $script:runFailures += 'deploy refusal'
         }
         $r = Invoke-Deploy @('-Test', '-Scenario', $Scenario, '-Force')
     } else {
@@ -135,6 +146,42 @@ try {
     }
     Write-Host $r.Out
     if ($r.Code -ne 0) { throw "deploy.ps1 failed (exit $($r.Code))" }
+}
+
+if ($Target -eq 'vm') {
+    . (Join-Path $root 'tools\vm\vm-sp.ps1')
+    # Timing scenarios judge tick costs and real time: valid only on the host, with the VM's game closed.
+    Assert-NNBSpScenario -Scenario $Scenario -HostOnly 'measure', 'cost'
+    # Core comes from the host's own build/package, installed by core's own deploy.ps1 (never built here).
+    $coreDeploy = Join-Path $root "mods\$CoreName\deploy.ps1"
+    if (-not (Test-Path $coreDeploy)) { throw "$CoreName's deploy.ps1 not found at $coreDeploy (the VM run installs core from its build/package)." }
+    $kept = Join-Path $outDir "$Scenario.vm.log"
+    Remove-Item $kept -ErrorAction SilentlyContinue
+    $run = Invoke-NNBSpRun -Instance $inst -TestMod $driver -Mods $CoreName, $driver, $name -Paks "$CoreName.pak" `
+        -EndPattern "\[$driver\] END result=" -TimeoutSec (Get-NNBSpTimeout $hostTimeout $TimeoutSec) -LogOut $kept -Prepare {
+            param($stage)
+            & pwsh -NoProfile -NonInteractive -File $coreDeploy -Instance $stage -Staged
+            if ($LASTEXITCODE -ne 0) { throw "$CoreName's deploy.ps1 failed in the stage (exit $LASTEXITCODE)" }
+            Set-DeployTarget $stage
+            Deploy-Scenario
+        }
+    $code = 0
+    if ($run.Log) {
+        & pwsh -NoProfile -NonInteractive -File (Join-Path $here 'check.ps1') -Log $kept -Scenario $Scenario -Target vm
+        $code = $LASTEXITCODE
+    } else { Write-Host 'No UE4SS.log from the VM.'; $code = 1 }
+    if ($script:runFailures) { Write-Host "run.ps1 check(s) failed: $($script:runFailures -join ', ')"; $code = 1 }
+    exit $code
+}
+
+if (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue) { throw 'Nuclear Nightmare is already running (a dev copy or the real game); not launching.' }
+Restore-Core # a run that was killed may have left core broken
+if (-not (Test-Path (Join-Path $modsDir "$CoreName\mod.json"))) { throw "$CoreName is not installed in $modsDir; install it with its own deploy.ps1 first." }
+
+$sw = [Diagnostics.Stopwatch]::StartNew()
+$result = 'not started'
+try {
+    Deploy-Scenario
 
     Remove-Item $log -ErrorAction SilentlyContinue
     & (Join-Path $root 'tools\launch.ps1') -Instance $inst
@@ -169,5 +216,5 @@ $kept = Join-Path $outDir "$Scenario.log"
 if (Test-Path $log) { Copy-Item $log $kept -Force } else { Write-Host "No UE4SS.log at $log" }
 & pwsh -NoProfile -NonInteractive -File (Join-Path $here 'check.ps1') -Log $kept -Scenario $Scenario
 $code = $LASTEXITCODE
-if ($runFailures) { Write-Host "run.ps1 check(s) failed: $($runFailures -join ', ')"; $code = 1 }
+if ($script:runFailures) { Write-Host "run.ps1 check(s) failed: $($script:runFailures -join ', ')"; $code = 1 }
 exit $code
