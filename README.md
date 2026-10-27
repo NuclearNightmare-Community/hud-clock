@@ -73,6 +73,23 @@ $copy = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'
 
 The driver (`test/ClockDriver/`, installed as `Mods/ClockDriver` between Nucleus and Clock, only with `deploy.ps1 -Test`) is plain UE4SS Lua and never ships. It can't reach the clock's Lua state, so it judges what's on the HUD: the clock's widget found in the live `InventoryUI_C` canvas by core's tag (`nucleus:Clock:clock.time`), its text and visibility, and the HUD's visibility.
 
+### Scenarios in the VM
+
+`run.ps1 -Target vm` runs a scenario in the Hyper-V VM `NNB` (account B; workspace `tools/vm/README.md`, "Single-player tests in the VM") instead of on the host, so it can run while you play on the host with your own account:
+
+```powershell
+./run.ps1 -Instance $copy -Scenario match -Target vm
+./run.ps1 -Instance $copy -Scenario no-core -Target vm
+./check.ps1 -Log <workspace>\dumps\v8.1.2-build26193463\clock\match.vm.log -Scenario match -Target vm
+```
+
+- `-Instance` is still the host's copy (absolute, also from a worktree): it names the build and finds the workspace's `tools/` and `mods/Nucleus/`. The VM's copy (`C:\nn\<same name>`) must be the same build; the run refuses otherwise. Nothing of the host copy is read except its exe size, and no host game is started, stopped or checked. Nucleus doesn't have to be installed anywhere first.
+- What goes into the VM copy: Nucleus from the workspace's `mods/Nucleus/build/package`, installed by Nucleus's own `deploy.ps1 -Staged`, then the clock and the driver by this repo's `deploy.ps1 -Test -Scenario <s> -Staged`, all into a host-side staging folder that `tools/vm/vm-sp.ps1` copies into the VM. `no-core` and `old-core` break core in the stage and check `deploy.ps1`'s refusal there, exactly as on the host. Nothing is built. UE4SS is switched on for the run; afterwards the VM copy is put back exactly as it was (UE4SS off, no mods), also after a crash or a time limit. An interrupted run is undone by the next one, or by `tools/vm/vm-sp-restore.ps1`.
+- Enter at touchdown: the driver's `request.txt`/`done.txt` are polled in the VM copy over PowerShell Direct, and the key is posted with `tools/vm/vm-key.ps1`.
+- Time limits are the host's times 1.5 (the VM's game is slower), unless `-TimeoutSec` is given. The log is kept as `dumps/<copy>/clock/<scenario>.vm.log`.
+- In the VM: `match`, `step5`, `rebuild`, `no-core`, `old-core`. Host only: `cost` and `measure` (they judge tick costs and real time; refused with `-Target vm`). `check.ps1 -Target vm` makes the one timing assertion inside the functional scenarios soft: core's `WARN hud slow tick ... steady state` under the clock's tag shows as `warn:` instead of failing. The read-tick cost is soft outside `cost` anyway.
+- Builds still happen on the host (Nucleus's `build.ps1` is CPU-heavy: the game you're playing may stutter meanwhile), and the VM's game itself shares the host's CPU and GPU.
+
 ### Measuring how the game advances time (story 2, part A)
 
 `./run.ps1 -Instance $copy -Scenario measure` (about 10 minutes, as host). The driver logs, once a second for 2 real minutes at each `Time Speed` (Fast 1.5, Normal 1.0, Long 0.5), `Time of Day`, the sky's H/M/S and the Journal map's own text (`MapWidget_C.GetText_0`, when the widget exists); every change of the sky's `Event Minute` (what UDS's `Every Minute` broadcasts, from `Check for Time Event Dispatchers`); 30 s across the wrap at 2400; and which skies exist after each travel. `check.ps1 -Scenario measure` prints real seconds per game minute per speed, jumps, and how many map samples differed from H/M/S. To answer the four questions:

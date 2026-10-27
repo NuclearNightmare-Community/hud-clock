@@ -11,16 +11,22 @@
   Scenarios: match, step5, rebuild, no-core, old-core, measure (run.ps1 drives them), and hand (a log from the
   README's hand check: only that the clock connected, showed a time and logged no error). unit needs no log: it runs
   test.ps1 (story 2 AC 2's pure tests and the rest of the unit tests).
+  -Target vm judges a log from run.ps1 -Target vm. The VM's game shares the CPU with the host, so the one timing
+  assertion inside the functional scenarios, "no hud slow tick in steady state" (core's WARN under the clock's tag),
+  is a soft check there; the read-tick cost is already soft outside cost. measure and cost are refused (host-only).
 .EXAMPLE
   ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\clock\match.log -Scenario match
   ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario hand
+  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\clock\match.vm.log -Scenario match -Target vm
 #>
 param(
     [string] $Instance,
     [string] $Log,
     [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost', 'hand', 'unit')]
-    [string] $Scenario = 'match'
+    [string] $Scenario = 'match',
+    [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
+if ($Target -eq 'vm' -and $Scenario -in 'measure', 'cost') { Write-Host "FAIL: $Scenario judges timing and is valid only on the host (run.ps1 without -Target vm)."; exit 1 }
 if ($Scenario -eq 'unit') { & pwsh -NoProfile -NonInteractive -File (Join-Path $PSScriptRoot 'test.ps1'); exit $LASTEXITCODE }
 $CoreName = 'Nucleus'
 $manifest = Get-Content (Join-Path $PSScriptRoot 'mod.json') -Raw | ConvertFrom-Json
@@ -62,10 +68,12 @@ $running = @(
     "!\[$C\] ui attach left .*'clock\.time'"
     "!\[$C\] ERROR"
     # Core's UI helpers log with the clock's tag; a slow tick while handling a HUD event is core's to judge (soft).
-    "!\[$C\] WARN (?!hud slow tick .*(HUD event|steady state, a Lua GC step ran inside it))"
+    # In the VM (-Target vm) every slow tick is soft: the VM's game shares the CPU with the host.
+    $(if ($Target -eq 'vm') { "!\[$C\] WARN (?!hud slow tick )" } else { "!\[$C\] WARN (?!hud slow tick .*(HUD event|steady state, a Lua GC step ran inside it))" })
     "?!\[$C\] WARN hud slow tick .*HUD event"
     "?!\[$C\] WARN hud slow tick .*steady state, a Lua GC step"
 )
+if ($Target -eq 'vm') { $running += "?!\[$C\] WARN hud slow tick .*steady state\)" }
 $driven = $running + @(
     "\[$D\] SCENARIO $([regex]::Escape($Scenario))\s*$"
     "\[$D\] END result=PASS"

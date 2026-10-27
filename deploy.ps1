@@ -14,6 +14,8 @@
   check.ps1 reads (cost: only the TICK cost lines, settings.lua profile = true). step5 implies -UpdateEvery 5.
   -Remove deletes Mods/Clock, Mods/ClockDriver and their mods.txt lines; nothing else changes (mods.txt keeps its
   bytes when it had no clock lines).
+  -Staged: $Instance is the host-side staging folder of a VM run (run.ps1 -Target vm, tools/vm/vm-sp.ps1), not a game
+  copy; only the running-game check is skipped (no game runs from it, and the host's game may be in use meanwhile).
   Pass the main checkout's instance path when running from a worktree.
 .EXAMPLE
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463
@@ -28,7 +30,8 @@ param(
     [string] $Scenario = 'match',
     [ValidateRange(0, 60)] [int] $UpdateEvery = 0,  # 0: mod.json's default
     [switch] $Force,
-    [switch] $Remove
+    [switch] $Remove,
+    [switch] $Staged
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'deploy-lib.ps1')
@@ -49,7 +52,7 @@ function Stop-Deploy([string] $why) { Write-Host "$name not deployed: $why"; exi
 if (-not (Test-Path (Join-Path $win64 'NuclearNightmare-Win64-Shipping.exe'))) { Stop-Deploy "not a game instance: $inst" }
 if (-not (Test-Path (Join-Path $ue4ss 'UE4SS.dll'))) { Stop-Deploy "UE4SS is not installed in $win64" }
 if (-not (Test-Path $modsTxt)) { Stop-Deploy "no mods.txt in $modsDir" }
-if (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue) { Stop-Deploy 'Nuclear Nightmare is running; close it first.' }
+if (-not $Staged -and (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue)) { Stop-Deploy 'Nuclear Nightmare is running; close it first.' }
 
 $file  = Read-ModsTxt $modsTxt
 $mine  = @($name, $driver)
