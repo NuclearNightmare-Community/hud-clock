@@ -105,7 +105,7 @@ foreach ($d in $mine) { Remove-Item (Join-Path $modsDir $d) -Recurse -Force -Err
 $dest = Join-Path $modsDir "$name\Scripts"
 New-Item -ItemType Directory -Force $dest | Out-Null
 Copy-Item (Join-Path $here 'mod.json') (Join-Path $modsDir $name) -Force
-foreach ($f in 'main.lua', 'time.lua') { Copy-Item (Join-Path $here "Scripts\$f") $dest -Force }
+foreach ($f in $ModScripts) { Copy-Item (Join-Path $here "Scripts\$f") $dest -Force }
 [IO.File]::WriteAllText((Join-Path $dest 'settings.lua'), $settings, [Text.UTF8Encoding]::new($false))
 
 # mods.txt: below core, above Keybinds. The driver goes between core and the clock (its old-core mode must run
