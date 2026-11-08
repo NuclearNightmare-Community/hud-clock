@@ -3,7 +3,7 @@
 -- (connect, core.ui.text, core.log). Holds no UObject between ticks: the element handle, the last shown boundary and
 -- the setting (AGENTS.md). Reads the time once a second on the game thread; changes the text only when the time
 -- crosses an updateEvery boundary.
-local CORE, NEED, ME = "Nucleus", "0.2.0", "Clock"
+local CORE, NEED, ME = "Nucleus", ">=0.2.0", "Clock"
 local ELEMENT = "clock.time"
 local PLACE = { host = "hud", corner = "top-right" }
 local TICK_MS = 1000

@@ -125,15 +125,15 @@ do -- Core not installed: exactly one [Clock] line, the bootstrap's own; nothing
     eq(#W.loops, 0, "no core: no loop")
 end
 
-do -- Core installed: connect{ mod = "Clock", need = "0.2.0" }, and nothing logged before it answers.
+do -- Core installed: connect{ mod = "Clock", need = ">=0.2.0" }, and nothing logged before it answers.
     boot()
     eq(#W.connects, 1, "connect called once")
     local c = W.connects[1]
-    ok(c.mod == "Clock" and c.need == "0.2.0", "connect{ mod = 'Clock', need = '0.2.0' }", tostring(c.mod) .. " " .. tostring(c.need))
+    ok(c.mod == "Clock" and c.need == ">=0.2.0", "connect{ mod = 'Clock', need = '>=0.2.0' }", tostring(c.mod) .. " " .. tostring(c.need))
     ok(type(c.onReady) == "function" and type(c.onFail) == "function", "connect gets onReady and onFail")
     eq(#W.printed, 0, "nothing printed during main.lua")
     -- onFail: connect has already logged its one line; the clock adds nothing (CAP-3).
-    c.onFail("Nucleus 0.1.0 is not compatible; Clock needs 0.2.0 (^ rules). Update Nucleus.")
+    c.onFail("Nucleus 0.1.0 is older than Clock needs (>=0.2.0). Update Nucleus.")
     eq(#W.printed, 0, "onFail adds no line")
     eq(#W.loops, 0, "onFail starts nothing")
 end
