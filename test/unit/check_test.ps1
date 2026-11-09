@@ -133,11 +133,11 @@ Expect ($noCore + (L 'Clock' 'READY updateEvery=1 element=clock.time')) 'no-core
 Expect ($noCore | Where-Object { $_ -notmatch 'NOCLOCK' }) 'no-core' 1 'no-core: no NOCLOCK fails'
 
 $oldCore = (Start-Log) + @((L 'ClockDriver' "OLDCORE published nucleus.version=0.1.0 (from Nucleus's installed mod.json)"),
-    (L 'Clock' 'ERROR Nucleus 0.1.0 is not compatible; Clock needs 0.2.0 (^ rules). Update Nucleus. Clock will not run.'),
+    (L 'Clock' 'ERROR Nucleus 0.1.0 is older than Clock needs (>=0.2.0). Update Nucleus. Clock will not run.'),
     (L 'ClockDriver' 'OK NOCLOCK match1 no clock widget on the HUD for 15 s (max seen 0)')) + (End-Log)
 Expect $oldCore 'old-core' 0 'old-core: passes' 'All checks passed'
 Expect ($oldCore + (L 'Clock' 'ERROR start failed: x')) 'old-core' 1 'old-core: a second [Clock] line fails'
-Expect ($oldCore -replace 'needs 0\.2\.0', 'needs 0.1.0') 'old-core' 1 'old-core: the wrong need fails'
+Expect ($oldCore -replace 'needs \(>=0\.2\.0\)', 'needs (>=0.1.0)') 'old-core' 1 'old-core: the wrong need fails'
 
 # ---------------------------------------------------------------- measure
 $measure = (Start-Log) + @((L 'ClockDriver' 'SCENARIO measure'), (L 'ClockDriver' 'SKIES match1 n=1 first=/Game/Maps/X'), (L 'ClockDriver' 'SKIES match2 n=1 first=/Game/Maps/X'),
