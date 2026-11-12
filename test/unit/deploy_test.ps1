@@ -103,7 +103,7 @@ Eq $m.settings.updateEvery.label 'Update every N game minutes' 'mod.json: the se
 Eq $m.settings.updateEvery.changeable 'anytime' 'mod.json: changeable anytime'
 Ok ($m.id -eq 'clock' -and $m.name -eq 'Clock' -and $m.version -eq '0.1.0' -and $m.scope -eq 'client') 'mod.json: id, name, version, scope'
 Ok ($m.dependsOn[0].id -eq 'nucleus' -and $m.dependsOn[0].version -eq '>=0.2.0') 'mod.json: dependsOn nucleus >=0.2.0 (a minimum, core story 18)'
-Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.2.1' -and $m.game.build -eq '26512322') 'mod.json: ue4ss and game build'
+Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.2.3' -and $m.game.build -eq '26601774') 'mod.json: ue4ss and game build'
 # The runtime need in main.lua equals dependsOn's minimum.
 $mainLua = Get-Content (Join-Path $repo 'Scripts\main.lua') -Raw
 Ok ($mainLua -match 'local CORE, NEED, ME = "Nucleus", ">=0.2.0", "Clock"') 'main.lua: need = dependsOn (>=0.2.0)'
