@@ -111,7 +111,7 @@ Deploy without `-Test` (`./deploy.ps1 -Instance $copy`), launch with `tools/laun
 4. Start another match. The clock is back, with that match's time.
 5. Optional: set `updateEvery` to 5 (`./deploy.ps1 -Instance $copy -UpdateEvery 5`), relaunch, and watch it step.
 
-Afterwards `./check.ps1 -Instance $copy -Scenario hand` checks the log: connected, `READY`, a time shown, no error. Record the result in story 4 (`_bmad-output/specs/spec-clock-v1/stories/story-4-scenarios-and-hand-check.md`).
+Afterwards `./check.ps1 -Instance $copy -Scenario hand` checks the log: connected, `READY`, a time shown, no error. Record the result in story 4 (`_bmad-output/specs/spec-clock-v1/stories/4-scenarios-and-hand-check.md`).
 
 ## Layout
 
