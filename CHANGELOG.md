@@ -11,6 +11,7 @@ For players: the clock's "update every N minutes" setting is now kept by Nucleus
 ### Changed
 
 - `updateEvery` comes from Nucleus's settings service (`core.settings.get`), and a watched change applies live (`SETTING updateEvery=<n>`). `Scripts/settings.lua` is gone: `deploy.ps1 -UpdateEvery N` writes `Mods/Clock/settings.json` instead, a redeploy without it keeps an existing one, and a release ships no settings file.
+- An existing `Scripts/settings.lua` is no longer read: a value chosen there must be set again in `Mods/Clock/settings.json` (for example `{"updateEvery":5}`; in Notepad, save with "All files" so the name ends in `.json`, not `.json.txt`).
 - The test-only `debug`/`profile` flags moved to `Scripts/dev.lua`, written only by `deploy.ps1 -Test`, read as text and never run.
 - Needs Nucleus `>=0.9.0` (`dependsOn` and `connect`).
 
