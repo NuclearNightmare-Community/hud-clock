@@ -14,6 +14,7 @@ For players: the clock's "update every N minutes" setting is now kept by Nucleus
 - An existing `Scripts/settings.lua` is no longer read: a value chosen there must be set again in `Mods/Clock/settings.json` (for example `{"updateEvery":5}`; in Notepad, save with "All files" so the name ends in `.json`, not `.json.txt`).
 - The test-only `debug`/`profile` flags moved to `Scripts/dev.lua`, written only by `deploy.ps1 -Test`, read as text and never run.
 - Needs Nucleus `>=0.9.0` (`dependsOn` and `connect`).
+- The mod id is now `nuclearnightmare-community.clock` (was `clock`), and `dependsOn` names Nucleus as `nuclearnightmare-community.nucleus` (distribution story 13, `mod-ids.md`): the namespaced ids every released mod takes before the first public release. The folder, `mods.txt` line and `name` are unchanged. `deploy.ps1` finds core's entry by the new id, so a dev copy needs a Nucleus deployed with the new id (Nucleus 0.12.0).
 
 ## [0.1.0] - 2026-11-13
 
