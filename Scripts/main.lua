@@ -1,9 +1,9 @@
 -- Clock (spec-clock-v1): the in-game time as HH:MM in the HUD's top-right corner during a match.
 -- Runs on Nucleus (core) through the dependent bootstrap (core's api-contract.md); uses only core's public API
--- (connect, core.ui.text, core.log). Holds no UObject between ticks: the element handle, the last shown boundary and
--- the setting (AGENTS.md). Reads the time once a second on the game thread; changes the text only when the time
--- crosses an updateEvery boundary.
-local CORE, NEED, ME = "Nucleus", ">=0.2.0", "Clock"
+-- (connect, core.ui.text, core.settings, core.log). Holds no UObject between ticks: the element handle, the last shown
+-- boundary and the setting (AGENTS.md). Reads the time once a second on the game thread; changes the text only when the
+-- time crosses an updateEvery boundary.
+local CORE, NEED, ME = "Nucleus", ">=0.9.0", "Clock"
 local ELEMENT = "clock.time"
 local PLACE = { host = "hud", corner = "top-right" }
 local TICK_MS = 1000
@@ -21,36 +21,43 @@ if not ok then print(("[%s] %s is not installed. %s will not run.\n"):format(ME,
 local time = require("time")
 
 -- ---------------------------------------------------------------- settings
--- deploy.ps1 generates Scripts/settings.lua from mod.json's defaults (clock story 1, decision 1). Problems are only
--- remembered here and logged once connected, so a missing core still leaves exactly one [Clock] line.
-local SETTINGS_DEFAULT = { updateEvery = 1 }
-local function loadSettings()
-    local s = { updateEvery = SETTINGS_DEFAULT.updateEvery, debug = false, profile = false }
-    local chunk, err = loadfile(scriptDir .. "/settings.lua", "t", {})
-    if not chunk then return s, "settings.lua could not be read (" .. tostring(err) .. "); run deploy.ps1. Using updateEvery = 1" end
-    local okS, t = pcall(chunk)
-    if not okS or type(t) ~= "table" then return s, "settings.lua did not return a table (" .. tostring(t) .. "); using updateEvery = 1" end
-    local problem
-    local n = t.updateEvery
-    if math.type(n) == "integer" and n >= 1 and n <= 60 then s.updateEvery = n
-    elseif n ~= nil then problem = "updateEvery must be an integer from 1 to 60, got " .. tostring(n) .. "; using 1" end
-    s.debug = t.debug == true     -- DEBUG lines (SHOW per value, TICK cost): deploy.ps1 -Test
-    s.profile = t.profile == true -- only the TICK cost lines, at info level: deploy.ps1 -Test -Scenario cost
-    return s, problem
+-- updateEvery comes from Nucleus's settings service (core.settings, Nucleus 0.9.0): declared in mod.json, its value
+-- kept by Nucleus in Mods/Clock/settings.json (written by deploy.ps1 -UpdateEvery, later by the Mod Manager), read in
+-- onReady and watched, so a change shows at the next tick (changeable "anytime").
+local UPDATE_DEFAULT = 1
+local function validEvery(n) return math.type(n) == "integer" and n >= 1 and n <= 60 end
+-- Test-only flags from Scripts/dev.lua, which only deploy.ps1 -Test writes (git-ignored, never shipped). Read as text,
+-- never run: "debug = true" turns on the DEBUG lines (SHOW per value, TICK cost), "profile = true" only the TICK cost
+-- lines at info level (deploy.ps1 -Test -Scenario cost).
+local function devFlags()
+    local d = { debug = false, profile = false }
+    local f = io.open(scriptDir .. "/dev.lua", "r")
+    if not f then return d end
+    local okR, text = pcall(f.read, f, 4096)
+    pcall(f.close, f)
+    text = okR and type(text) == "string" and text or ""
+    d.debug = text:find("debug%s*=%s*true") ~= nil
+    d.profile = text:find("profile%s*=%s*true") ~= nil
+    return d
 end
-local settings, settingsProblem = loadSettings()
+local settings = devFlags()
 
 -- ---------------------------------------------------------------- the clock (clock story 3)
 local function start(core)
     local log = core.log
     log.debugEnabled = settings.debug
-    if settingsProblem then log.warn("%s", settingsProblem) end
     local ui = type(core.ui) == "table" and core.ui.text or nil
     if type(ui) ~= "table" then
         log.error("%s's UI helpers are not available. %s will not run.", CORE, ME)
         return
     end
-    local n = settings.updateEvery
+    local cs = type(core.settings) == "table" and core.settings or nil
+    local n = UPDATE_DEFAULT
+    do
+        local okS, v = pcall(function() return cs.get("updateEvery") end)
+        if okS and validEvery(v) then n = v
+        else log.warn("updateEvery could not be read from %s's settings (%s); using %d", CORE, okS and ("got " .. tostring(v)) or tostring(v), UPDATE_DEFAULT) end
+    end
     if core.ref and core.deref and core.free then time.useHandles(core.ref, core.deref, core.free) end
 
     local okC, el = pcall(ui.create, { id = ELEMENT, text = "", place = PLACE })
@@ -134,6 +141,19 @@ local function start(core)
         pcall(ui.setVisible, el, false)
         last, visible = nil, false
     end)
+
+    -- A changed updateEvery (the Mod Manager, or anyone through core.settings) applies at the next tick: last is
+    -- forgotten, so the next tick sets the text with the new rounding.
+    local okW, errW = pcall(function()
+        return cs.watch(function(key, value)
+            if key ~= "updateEvery" then return end
+            if not validEvery(value) then log.warn("updateEvery changed to %s, which isn't an integer from 1 to 60; keeping %d", tostring(value), n) return end
+            if value == n then return end
+            n, last = value, nil
+            log.info("SETTING updateEvery=%d", n)
+        end)
+    end)
+    if not okW then log.warn("could not watch %s's settings (%s); a changed updateEvery applies after a restart", CORE, tostring(errW)) end
 
     -- A game-thread loop registered from the game thread (onReady runs there). Never LoopAsync + ExecuteInGameThread:
     -- in the pinned UE4SS those can lose their callback (core's ui/hud.lua).

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Unit tests for deploy-lib.ps1 (version needs, mods.txt editing, settings.lua) and deploy.ps1 end to end against a
+  Unit tests for deploy-lib.ps1 (version needs, mods.txt editing, settings.json, dev.lua) and deploy.ps1 end to end against a
   fake game instance in a temp folder (never a real copy: no game, no UE4SS, only the files deploy.ps1 looks at).
 .EXAMPLE
   pwsh -NoProfile -File test/unit/deploy_test.ps1
@@ -88,25 +88,26 @@ Eq (Get-ModsTxtState -Lines @('Nucleus : 0') -Name 'Nucleus') 'disabled' 'state:
 Eq (Get-ModsTxtState -Lines $stock -Name 'Nucleus') 'absent' 'state: absent'
 Eq (Get-ModsTxtState -Lines @('NucleusX : 1') -Name 'Nucleus') 'absent' 'state: a longer name is not Nucleus'
 
-# ---------------------------------------------------------------- settings.lua
+# ---------------------------------------------------------------- settings.json and dev.lua (Nucleus 0.9.0's values file)
 $m = Get-Content (Join-Path $repo 'mod.json') -Raw | ConvertFrom-Json
-$text = ConvertTo-SettingsLua -Manifest $m
-Ok ($text -match "(?m)^return \{ updateEvery = 1 \}$") 'settings: default updateEvery = 1' $text
-Ok ((ConvertTo-SettingsLua -Manifest $m -Override @{ updateEvery = 5 }) -match 'return \{ updateEvery = 5 \}') 'settings: override 5'
-Ok ((ConvertTo-SettingsLua -Manifest $m -DebugLog) -match 'return \{ updateEvery = 1, debug = true \}') 'settings: -DebugLog adds debug = true'
-Ok ((ConvertTo-SettingsLua -Manifest $m -Profile) -match 'return \{ updateEvery = 1, profile = true \}') 'settings: -Profile adds profile = true'
-Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ updateEvery = 61 } } 'not an integer from 1 to 60' 'settings: 61 refused'
-Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ updateEvery = 0 } } 'not an integer from 1 to 60' 'settings: 0 refused'
-Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ updateEvery = '5' } } 'not an integer' 'settings: a string refused'
-Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ colour = 1 } } 'not declared' 'settings: undeclared refused'
+Eq (ConvertTo-SettingsJson -Manifest $m) $null 'settings: nothing to override -> no file'
+Eq (ConvertTo-SettingsJson -Manifest $m -Override @{ updateEvery = 5 }) '{"updateEvery":5}' 'settings: override 5'
+Eq (ConvertTo-SettingsJson -Manifest $m -Override @{ updateEvery = 1 }) '{"updateEvery":1}' 'settings: override 1'
+Throws { ConvertTo-SettingsJson -Manifest $m -Override @{ updateEvery = 61 } } 'not an integer from 1 to 60' 'settings: 61 refused'
+Throws { ConvertTo-SettingsJson -Manifest $m -Override @{ updateEvery = 0 } } 'not an integer from 1 to 60' 'settings: 0 refused'
+Throws { ConvertTo-SettingsJson -Manifest $m -Override @{ updateEvery = '5' } } 'not an integer' 'settings: a string refused'
+Throws { ConvertTo-SettingsJson -Manifest $m -Override @{ colour = 1 } } 'not declared' 'settings: undeclared refused'
+Eq (ConvertTo-DevLua) $null 'dev.lua: no flags -> no file'
+Ok ((ConvertTo-DevLua -DebugLog) -match '(?m)^return \{ debug = true \}$') 'dev.lua: -DebugLog'
+Ok ((ConvertTo-DevLua -Profile) -match '(?m)^return \{ profile = true \}$') 'dev.lua: -Profile'
 Eq $m.settings.updateEvery.label 'Update every N game minutes' 'mod.json: the setting has its label'
 Eq $m.settings.updateEvery.changeable 'anytime' 'mod.json: changeable anytime'
-Ok ($m.id -eq 'clock' -and $m.name -eq 'Clock' -and $m.version -eq '0.1.0' -and $m.scope -eq 'client') 'mod.json: id, name, version, scope'
-Ok ($m.dependsOn[0].id -eq 'nucleus' -and $m.dependsOn[0].version -eq '>=0.2.0') 'mod.json: dependsOn nucleus >=0.2.0 (a minimum, core story 18)'
+Ok ($m.id -eq 'clock' -and $m.name -eq 'Clock' -and $m.version -eq '0.2.0' -and $m.scope -eq 'client') 'mod.json: id, name, version, scope'
+Ok ($m.dependsOn[0].id -eq 'nucleus' -and $m.dependsOn[0].version -eq '>=0.9.0') 'mod.json: dependsOn nucleus >=0.9.0 (a minimum, core story 18; core.settings)'
 Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.2.3' -and $m.game.build -eq '26601774') 'mod.json: ue4ss and game build'
 # The runtime need in main.lua equals dependsOn's minimum.
 $mainLua = Get-Content (Join-Path $repo 'Scripts\main.lua') -Raw
-Ok ($mainLua -match 'local CORE, NEED, ME = "Nucleus", ">=0.2.0", "Clock"') 'main.lua: need = dependsOn (>=0.2.0)'
+Ok ($mainLua -match 'local CORE, NEED, ME = "Nucleus", ">=0.9.0", "Clock"') 'main.lua: need = dependsOn (>=0.9.0)'
 
 # ---------------------------------------------------------------- mods.txt bytes
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("clock-deploy-test-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -161,18 +162,18 @@ try {
     [IO.File]::WriteAllText($modsTxt, $coreTxt)
     Set-Core '0.1.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.1\.0 is installed, but Clock needs >=0\.2\.0; update Nucleus\.') 'deploy: core 0.1.0 -> refused, naming both versions' $d.Out
-    Set-Core '0.4.0'
+    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.1\.0 is installed, but Clock needs >=0\.9\.0; update Nucleus\.') 'deploy: core 0.1.0 -> refused, naming both versions' $d.Out
+    Set-Core '0.10.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 0) 'deploy: core 0.4.0 (a newer minor) -> installed' $d.Out
-    Set-Core '0.5.0' '0.1.0'
+    Ok ($d.Code -eq 0) 'deploy: core 0.10.0 (a newer minor) -> installed' $d.Out
+    Set-Core '0.11.0' '0.1.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 0) 'deploy: core 0.5.0, floor 0.1.0 -> installed' $d.Out
-    Set-Core '0.5.0' '0.3.0'
+    Ok ($d.Code -eq 0) 'deploy: core 0.11.0, floor 0.1.0 -> installed' $d.Out
+    Set-Core '1.0.0' '0.10.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 1 -and $d.Out -match '^Clock not deployed: Clock was made for Nucleus >=0\.2\.0, which this Nucleus 0\.5\.0 no longer supports \(oldest: 0\.3\.0\); update Clock\.') 'deploy: floor 0.3.0 above the need -> refused, naming the mod' $d.Out
+    Ok ($d.Code -eq 1 -and $d.Out -match '^Clock not deployed: Clock was made for Nucleus >=0\.9\.0, which this Nucleus 1\.0\.0 no longer supports \(oldest: 0\.10\.0\); update Clock\.') 'deploy: floor 0.10.0 above the need -> refused, naming the mod' $d.Out
     Ok (($d.Out.Trim() -split "`r?`n").Count -eq 1) 'deploy: the floor refusal is one line' $d.Out
-    Set-Core '0.5.0' 'soon'
+    Set-Core '0.11.0' 'soon'
     $d = Deploy @()
     Ok ($d.Code -eq 0) 'deploy: a floor that is not X.Y.Z is no floor (as core)' $d.Out
     Deploy @('-Remove') | Out-Null
@@ -182,37 +183,44 @@ try {
     Ok ($d.Code -eq 1 -and $d.Out -match "is not Nucleus's manifest") 'deploy: unreadable core mod.json -> refused' $d.Out
 
     # Core disabled.
-    Set-Core '0.2.0'
+    Set-Core '0.9.0'
     [IO.File]::WriteAllText($modsTxt, "Nucleus : 0`r`n" + $stockTxt)
     $d = Deploy @()
     Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus is installed but disabled in mods\.txt') 'deploy: core disabled -> refused' $d.Out
 
-    # Good core: installed below Nucleus, above Keybinds; settings.lua generated; no core files bundled.
+    # Good core: installed below Nucleus, above Keybinds; no settings file without -UpdateEvery; no core files bundled.
     [IO.File]::WriteAllText($modsTxt, "Clock : 1`r`n" + $coreTxt) # a Clock line above Nucleus must move below it
-    Set-Core '0.2.1'
+    Set-Core '0.9.1'
     $d = Deploy @()
-    Ok ($d.Code -eq 0) 'deploy: core 0.2.1 -> installed' $d.Out
+    Ok ($d.Code -eq 0) 'deploy: core 0.9.1 -> installed' $d.Out
     Eq (Txt) ("Nucleus : 1`r`nClock : 1`r`n" + $stockTxt) 'deploy: Clock below Nucleus, above Keybinds'
     $files = @(Get-ChildItem (Join-Path $mods 'Clock') -Recurse -File | ForEach-Object { $_.FullName.Substring((Join-Path $mods 'Clock').Length + 1) } | Sort-Object)
-    Eq ($files -join ',') 'mod.json,Scripts\main.lua,Scripts\settings.lua,Scripts\time.lua' 'deploy: exactly the clock files'
-    Ok ((Get-Content (Join-Path $mods 'Clock\Scripts\settings.lua') -Raw) -match 'return \{ updateEvery = 1 \}') 'deploy: settings.lua from mod.json defaults'
+    Eq ($files -join ',') 'mod.json,Scripts\main.lua,Scripts\time.lua' 'deploy: exactly the clock files (no settings file, no dev.lua)'
     Ok (-not (Test-Path (Join-Path $mods 'ClockDriver'))) 'deploy: no driver without -Test'
 
-    # -UpdateEvery 5.
+    # -UpdateEvery 5 writes Nucleus's values file; a redeploy without it keeps the file byte for byte.
+    $values = Join-Path $mods 'Clock\settings.json'
     $d = Deploy @('-UpdateEvery', '5')
-    Ok ((Get-Content (Join-Path $mods 'Clock\Scripts\settings.lua') -Raw) -match 'return \{ updateEvery = 5 \}') 'deploy: -UpdateEvery 5' $d.Out
+    Eq ([IO.File]::ReadAllText($values)) '{"updateEvery":5}' 'deploy: -UpdateEvery 5 writes settings.json'
     Eq (Txt) ("Nucleus : 1`r`nClock : 1`r`n" + $stockTxt) 'deploy: redeploy keeps one Clock line'
+    [IO.File]::WriteAllText($values, '{"updateEvery":12}')   # as Nucleus would have written it in game
+    $d = Deploy @()
+    Eq ([IO.File]::ReadAllText($values)) '{"updateEvery":12}' 'deploy: a redeploy keeps the existing settings.json' $d.Out
+    Ok ($d.Out -match 'settings\.json: kept as it was') 'deploy: says it kept it' $d.Out
 
-    # -Test: driver between Nucleus and Clock, scenario written, debug on; step5 implies 5.
+    # -Test: driver between Nucleus and Clock, scenario written, dev.lua debug on; step5 implies 5, others 1.
     $d = Deploy @('-Test', '-Scenario', 'step5')
     Ok ($d.Code -eq 0) 'deploy -Test: installed' $d.Out
     Eq (Txt) ("Nucleus : 1`r`nClockDriver : 1`r`nClock : 1`r`n" + $stockTxt) 'deploy -Test: Nucleus, ClockDriver, Clock, then the rest'
     Eq ([IO.File]::ReadAllText((Join-Path $mods 'ClockDriver\Scripts\scenario.txt'))) 'step5' 'deploy -Test: scenario.txt'
-    Ok ((Get-Content (Join-Path $mods 'Clock\Scripts\settings.lua') -Raw) -match 'return \{ updateEvery = 5, debug = true \}') 'deploy -Test step5: updateEvery 5, debug on'
+    Eq ([IO.File]::ReadAllText($values)) '{"updateEvery":5}' 'deploy -Test step5: settings.json updateEvery 5'
+    Ok ((Get-Content (Join-Path $mods 'Clock\Scripts\dev.lua') -Raw) -match 'return \{ debug = true \}') 'deploy -Test step5: dev.lua debug on'
     $d = Deploy @('-Test', '-Scenario', 'cost')
-    Ok ((Get-Content (Join-Path $mods 'Clock\Scripts\settings.lua') -Raw) -match 'return \{ updateEvery = 1, profile = true \}') 'deploy -Test cost: profile on, no debug' $d.Out
+    Eq ([IO.File]::ReadAllText($values)) '{"updateEvery":1}' 'deploy -Test cost: settings.json updateEvery 1 (no earlier value inherited)'
+    Ok ((Get-Content (Join-Path $mods 'Clock\Scripts\dev.lua') -Raw) -match 'return \{ profile = true \}') 'deploy -Test cost: profile on, no debug' $d.Out
     $d = Deploy @()
     Ok (-not (Test-Path (Join-Path $mods 'ClockDriver')) -and (Txt) -eq ("Nucleus : 1`r`nClock : 1`r`n" + $stockTxt)) 'deploy without -Test removes the driver'
+    Ok (-not (Test-Path (Join-Path $mods 'Clock\Scripts\dev.lua'))) 'deploy without -Test: no dev.lua'
 
     # -Force: installs despite a missing core, above Keybinds.
     Set-Core '0.1.0'
@@ -229,7 +237,7 @@ try {
     Ok ($d.Code -eq 0 -and -not (Test-Path (Join-Path $mods 'Clock'))) 'deploy -Remove: no clock files' $d.Out
     Eq (Txt) $stockTxt 'deploy -Remove: mods.txt byte-identical to stock'
     New-Item -ItemType Directory -Force (Join-Path $mods 'Nucleus') | Out-Null
-    Set-Core '0.2.0'
+    Set-Core '0.9.0'
     [IO.File]::WriteAllText($modsTxt, $coreTxt)
     Deploy @('-Test') | Out-Null
     Deploy @('-Remove') | Out-Null
