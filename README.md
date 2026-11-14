@@ -11,9 +11,9 @@ A Nuclear Nightmare mod that shows the in-game time as `HH:MM` (24-hour, the Jou
 Nucleus must be installed in the dev copy first (its own `deploy.ps1`). Then, from this repo (from a worktree, pass the main checkout's instance path):
 
 ```powershell
-./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463
-./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -UpdateEvery 5
-./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Remove
+./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2.3-build26601774
+./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2.3-build26601774 -UpdateEvery 5
+./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2.3-build26601774 -Remove
 ```
 
 `deploy.ps1` refuses, with one line and exit code 1, when Nucleus isn't installed in the copy, is disabled in `mods.txt`, or its installed `mod.json` version doesn't satisfy `dependsOn` (`>=0.9.0`: a minimum, and not below the installed core's `compat.floor`). Otherwise it copies `mod.json` and `Scripts/` to `Mods/Clock/`, writes `Mods/Clock/settings.json` when `-UpdateEvery` is given (otherwise an existing `settings.json` survives the redeploy untouched), and puts `Clock : 1` in `mods.txt` right below Nucleus's line and above `Keybinds : 1` (it moves the line there if it was elsewhere). It never bundles core's files and never writes outside `Mods/Clock`, `Mods/ClockDriver` and those `mods.txt` lines. `-Remove` takes all of that out again; `mods.txt` keeps its exact bytes otherwise.
@@ -51,7 +51,7 @@ Lua tests run with any Lua 5.3/5.4 on PATH (MiKTeX's `texlua.exe` is one): `test
 `run.ps1` deploys with the test driver, launches through `tools/launch.ps1`, presses Enter at touchdown (posted to the game window only), waits for the driver's `END` line (or a crash or the time limit), closes only the game under that instance, keeps the log as `dumps/<copy>/clock/<scenario>.log` and runs `check.ps1` on it. Nucleus must be installed in the copy. Steam must be running, and nothing else may be running the game.
 
 ```powershell
-$copy = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'
+$copy = 'C:\...\nuclear-nightmare\game-instances\v8.2.3-build26601774'
 ./run.ps1 -Instance $copy -Scenario match      # two matches with the menu between; time forced forward on the host
 ./run.ps1 -Instance $copy -Scenario step5      # updateEvery = 5; frozen sky set to chosen minutes
 ./run.ps1 -Instance $copy -Scenario rebuild    # RemoveAllWidgets and re-add the HUD mid-match
@@ -81,7 +81,7 @@ The driver (`test/ClockDriver/`, installed as `Mods/ClockDriver` between Nucleus
 ```powershell
 ./run.ps1 -Instance $copy -Scenario match -Target vm
 ./run.ps1 -Instance $copy -Scenario no-core -Target vm
-./check.ps1 -Log <workspace>\dumps\v8.1.2-build26193463\clock\match.vm.log -Scenario match -Target vm
+./check.ps1 -Log <workspace>\dumps\v8.2.3-build26601774\clock\match.vm.log -Scenario match -Target vm
 ```
 
 - `-Instance` is still the host's copy (absolute, also from a worktree): it names the build and finds the workspace's `tools/` and `mods/Nucleus/`. The VM's copy (`C:\nn\<same name>`) must be the same build; the run refuses otherwise. Nothing of the host copy is read except its exe size, and no host game is started, stopped or checked. Nucleus doesn't have to be installed anywhere first.
