@@ -130,7 +130,7 @@ $expect = @{
     'hand' = $running
     # Diagnostic: what each engine call of a clock read costs (COST lines); only that the probe ran.
     # What each engine call of a clock read costs (COST lines), then the clock as a normal install runs it (no DEBUG
-    # lines; settings.lua profile = true logs only the TICK cost lines) through a few idle minutes in a match.
+    # lines; dev.lua profile = true logs only the TICK cost lines) through a few idle minutes in a match.
     'cost' = $running + @(
         "\[$D\] COST match1 all of time.read's calls avg ", "\[$D\] IDLE match1 ", "\[$D\] END result=PASS"
         "\[$C\] TICK n=\d+ avg ", "!\[$C\] DEBUG SHOW "

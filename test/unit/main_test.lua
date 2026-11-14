@@ -1,6 +1,6 @@
 -- Unit tests for Scripts/main.lua outside the game: the bootstrap, settings, and the glue between time.lua and core's
--- UI helpers (clock stories 1 and 3), against a fake core (client.connect, core.ui.text, core.log, core.clock), a
--- fake sky and stubbed UE4SS globals. The in-game proof is run.ps1 (story 4).
+-- UI helpers (clock stories 1 and 3), against a fake core (client.connect, core.ui.text, core.settings, core.log,
+-- core.clock), a fake sky and stubbed UE4SS globals. The in-game proof is run.ps1 (story 4).
 -- Run from the repo root with any standalone Lua 5.3 or 5.4:  texlua test/unit/main_test.lua
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 local MAIN = ROOT .. "/Scripts/main.lua"
@@ -13,7 +13,7 @@ local function eq(got, want, name) ok(got == want, name, "got " .. tostring(got)
 
 -- ---------------------------------------------------------------- fakes
 local W -- the world of one test: printed lines, ui calls, loops, hooks, sky
-local realLoadfile, realLoad = loadfile, load
+local realLoadfile, realOpen = loadfile, io.open
 
 local function newSky(path, tod)
     local s = { path = path, alive = true }
@@ -76,7 +76,7 @@ local function newUi()
     return U
 end
 
--- Loads main.lua fresh. opts: client = false (core not installed) | nil; settings = text of settings.lua | false.
+-- Loads main.lua fresh. opts: client = false (core not installed) | nil; dev = text of Scripts/dev.lua (nil: none).
 local function boot(opts)
     opts = opts or {}
     W = { printed = {}, loops = {}, loadMapHooks = {}, objects = {}, finds = 0, async = 0, connects = {} }
@@ -88,27 +88,48 @@ local function boot(opts)
             return { connect = function(o) W.connects[#W.connects + 1] = o end }
         end
     end
-    loadfile = function(path, mode, env)
-        if path:match("[/\\]settings%.lua$") then
-            if opts.settings == false then return nil, "cannot open " .. path end
-            return realLoad(opts.settings or "return { updateEvery = 1 }", "=settings.lua", "t", env)
+    loadfile = function(path, ...)
+        W.loadfiles = (W.loadfiles or 0) + (path:match("[/\\]dev%.lua$") and 1 or 0)
+        return realLoadfile(path, ...)
+    end
+    io.open = function(path, mode)
+        if path:match("[/\\]dev%.lua$") then
+            if not opts.dev then return nil, "cannot open " .. path end
+            local text = opts.dev
+            return { read = function() local t = text; text = nil; return t end, close = function() end }
         end
-        return realLoadfile(path, mode, env)
+        return realOpen(path, mode)
     end
     local chunk = assert(realLoadfile(MAIN))
     chunk()
     loadfile = realLoadfile
+    io.open = realOpen
 end
 
 local function connect(core)
     local c = W.connects[1]
     c.onReady(core)
 end
+-- o.every: what core.settings.get("updateEvery") returns (default 1); o.getErr: get raises it; o.settings = false: no
+-- core.settings at all.
 local function newCore(o)
     o = o or {}
     local now = 0
-    local core = { name = "Nucleus", version = "0.2.0", log = newLog("Clock") }
+    local core = { name = "Nucleus", version = "0.9.0", log = newLog("Clock") }
     if o.ui ~= false then core.ui = newUi() end
+    if o.settings ~= false then
+        W.watchers = {}
+        core.settings = {
+            get = function(k)
+                W.gets = (W.gets or 0) + 1
+                if o.getErr then error(o.getErr, 0) end
+                assert(k == "updateEvery", "unexpected key " .. tostring(k))
+                if o.every == nil then return 1 end
+                return o.every
+            end,
+            watch = function(fn) W.watchers[#W.watchers + 1] = fn return #W.watchers end,
+        }
+    end
     if o.clock ~= false then core.clock = { micros = function() now = now + 25 return now end } end
     return core
 end
@@ -125,38 +146,48 @@ do -- Core not installed: exactly one [Clock] line, the bootstrap's own; nothing
     eq(#W.loops, 0, "no core: no loop")
 end
 
-do -- Core installed: connect{ mod = "Clock", need = ">=0.2.0" }, and nothing logged before it answers.
+do -- Core installed: connect{ mod = "Clock", need = ">=0.9.0" }, and nothing logged before it answers.
     boot()
     eq(#W.connects, 1, "connect called once")
     local c = W.connects[1]
-    ok(c.mod == "Clock" and c.need == ">=0.2.0", "connect{ mod = 'Clock', need = '>=0.2.0' }", tostring(c.mod) .. " " .. tostring(c.need))
+    ok(c.mod == "Clock" and c.need == ">=0.9.0", "connect{ mod = 'Clock', need = '>=0.9.0' } (core.settings)", tostring(c.mod) .. " " .. tostring(c.need))
     ok(type(c.onReady) == "function" and type(c.onFail) == "function", "connect gets onReady and onFail")
     eq(#W.printed, 0, "nothing printed during main.lua")
     -- onFail: connect has already logged its one line; the clock adds nothing (CAP-3).
-    c.onFail("Nucleus 0.1.0 is older than Clock needs (>=0.2.0). Update Nucleus.")
+    c.onFail("Nucleus 0.1.0 is older than Clock needs (>=0.9.0). Update Nucleus.")
     eq(#W.printed, 0, "onFail adds no line")
     eq(#W.loops, 0, "onFail starts nothing")
 end
 
-do -- A settings problem is logged only after connect (so a missing core still gives one line).
-    boot{ settings = false }
-    eq(#W.printed, 0, "settings missing: nothing before connect")
-    connect(newCore())
-    eq(#lines("^%[Clock%] WARN settings%.lua could not be read"), 1, "settings missing: one WARN after connect")
-    ok(#lines("^%[Clock%] READY updateEvery=1 element=clock%.time$") == 1, "settings missing: runs with updateEvery = 1")
-end
-do
-    for _, bad in ipairs({ "return { updateEvery = 0 }", "return { updateEvery = 61 }", "return { updateEvery = 2.5 }", "return { updateEvery = '5' }" }) do
-        boot{ settings = bad }
-        connect(newCore())
-        ok(#lines("WARN updateEvery must be an integer from 1 to 60") == 1 and #lines("READY updateEvery=1 ") == 1, "bad setting falls back to 1: " .. bad)
+do -- updateEvery from core.settings, read in onReady; a problem is one WARN after connect and N = 1.
+    boot()
+    eq(#W.printed, 0, "nothing before connect")
+    connect(newCore{ every = 7 })
+    eq(W.gets, 1, "core.settings.get('updateEvery') once in onReady")
+    eq(#lines("^%[Clock%] READY updateEvery=7 element=clock%.time$"), 1, "READY shows the stored value")
+    eq(#lines("WARN"), 0, "no WARN")
+    eq(#W.watchers, 1, "one settings watcher")
+    boot()
+    connect(newCore{ getErr = "nucleus.settings.get: call-failed channel class not loaded" })
+    eq(#lines("^%[Clock%] WARN updateEvery could not be read from Nucleus's settings %(nucleus%.settings%.get: call%-failed"), 1, "get raises: one WARN")
+    ok(#lines("^%[Clock%] READY updateEvery=1 element=clock%.time$") == 1, "get raises: runs with updateEvery = 1")
+    boot()
+    connect(newCore{ settings = false })
+    ok(#lines("WARN updateEvery could not be read") == 1 and #lines("WARN could not watch Nucleus's settings") == 1 and #lines("READY updateEvery=1 ") == 1,
+        "no core.settings: WARNs, N = 1, still runs")
+    for _, bad in ipairs({ 0, 61, 2.5, "5", false }) do
+        boot()
+        connect(newCore{ every = bad })
+        ok(#lines("WARN updateEvery could not be read from Nucleus's settings %(got " .. tostring(bad):gsub("%.", "%%.") .. "%); using 1") == 1
+            and #lines("READY updateEvery=1 ") == 1, "a bad stored value falls back to 1: " .. tostring(bad))
     end
-    boot{ settings = "error('broken')" }
-    connect(newCore())
-    ok(#lines("WARN settings%.lua did not return a table") == 1, "settings.lua that throws: WARN and defaults")
-    boot{ settings = "return os.exit(3)" } -- sandboxed: settings.lua sees no globals
-    connect(newCore())
-    ok(#lines("WARN settings%.lua did not return a table") == 1, "settings.lua runs with an empty environment")
+end
+
+do -- dev.lua: read as text, never run
+    boot{ dev = "return { debug = true }" }
+    eq(W.loadfiles or 0, 0, "dev.lua is never loaded as code")
+    boot{ dev = "os.exit(3) -- profile = true" }
+    eq(W.loadfiles or 0, 0, "dev.lua with code in it: still only text")
 end
 
 do -- No UI helpers on the api: one ERROR line, no element, no loop.
@@ -322,8 +353,8 @@ do -- With core's weak handles: the sky is kept as a handle, re-found by Deref; 
 end
 
 do -- updateEvery = 5: multiples of 5, changes only at multiples.
-    boot{ settings = "return { updateEvery = 5 }" }
-    local core = newCore()
+    boot()
+    local core = newCore{ every = 5 }
     local U = core.ui
     connect(core)
     eq(#lines("READY updateEvery=5 "), 1, "READY with updateEvery=5")
@@ -335,8 +366,35 @@ do -- updateEvery = 5: multiples of 5, changes only at multiples.
     eq(table.concat(shown, " "), "10:05 10:10 10:15 10:20 10:25 10:30", "n=5: shows 10:05, then each multiple of 5 once")
 end
 
+do -- A watched change applies at the next tick (changeable "anytime"): one SETTING line, the new rounding at once.
+    boot()
+    local core = newCore()
+    local U = core.ui
+    connect(core)
+    W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(10, 7))
+    tick()
+    local i = #U.calls
+    W.watchers[1]("other.key", 3)
+    eq(#lines("SETTING"), 0, "another key: ignored")
+    W.watchers[1]("updateEvery", 5)
+    eq(#lines("^%[Clock%] SETTING updateEvery=5$"), 1, "SETTING line")
+    tick()
+    local sets = callsSince(U, i, "set")
+    ok(#sets == 1 and sets[1] == "10:05", "next tick shows the new rounding (10:07 -> 10:05)", sets[1])
+    W.watchers[1]("updateEvery", 5)
+    eq(#lines("SETTING"), 1, "the same value again: nothing")
+    W.watchers[1]("updateEvery", 0)
+    eq(#lines("WARN updateEvery changed to 0, which isn't an integer from 1 to 60; keeping 5"), 1, "a bad value: one WARN, kept")
+    W.watchers[1]("updateEvery", 1)
+    i = #U.calls
+    tick()
+    sets = callsSince(U, i, "set")
+    ok(#sets == 1 and sets[1] == "10:07", "back to 1: 10:07 at the next tick", sets[1])
+    eq(#lines("VISIBLE"), 1, "no new VISIBLE line while shown")
+end
+
 do -- Debug lines: SHOW per change and a TICK cost line every 60 ticks, only with debug = true.
-    boot{ settings = "return { updateEvery = 1, debug = true }" }
+    boot{ dev = "return { debug = true }" }
     local core = newCore()
     connect(core)
     W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(9, 5))
@@ -349,13 +407,13 @@ do -- Debug lines: SHOW per change and a TICK cost line every 60 ticks, only wit
     W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(9, 5))
     tick(60)
     eq(#lines("DEBUG"), 0, "no debug lines by default")
-    boot{ settings = "return { updateEvery = 1, profile = true }" }
+    boot{ dev = "return { profile = true }" }
     connect(newCore())
     W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(9, 5))
     tick(60)
     eq(#lines("^%[Clock%] TICK n=60 avg [%d%.]+ max %d+ us %(read 0%.0, set 0%.0 over 1 changes, log 0%.0%)$"), 1, "profile: one info TICK line, whole tick only")
     eq(#lines("DEBUG"), 0, "profile: no DEBUG lines")
-    boot{ settings = "return { updateEvery = 1, debug = true }" }
+    boot{ dev = "return { debug = true }" }
     connect(newCore{ clock = false })
     W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(9, 5))
     ok(pcall(tick, 60), "no core.clock: ticks still run")
@@ -379,7 +437,7 @@ do -- The clock never keeps a UObject: after ticks, its upvalues hold no sky.
             if not name then break end
             if val == W.sky then held = true end
             if type(val) == "function" then scan(val, depth + 1) end
-            if type(val) == "table" and val ~= W and val ~= core and val ~= core.ui then
+            if type(val) == "table" and val ~= W and val ~= core and val ~= core.ui and val ~= core.settings then
                 for _, x in pairs(val) do if x == W.sky then held = true end end
             end
         end

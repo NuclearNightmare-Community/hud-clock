@@ -6,13 +6,16 @@
   mod.json version satisfies the clock's dependsOn (a minimum, not below the installed core's compat.floor;
   deploy-lib.ps1). -Force installs anyway, for the failure scenarios
   (the clock's own runtime check then has to catch it).
-  Installs ue4ss/Mods/Clock/{mod.json, Scripts/main.lua, Scripts/time.lua} and generates Scripts/settings.lua from
-  mod.json's setting defaults (-UpdateEvery overrides updateEvery). Writes "Clock : 1" into mods.txt right below
-  Nucleus's line and above "Keybinds : 1", moving it there if it was elsewhere. Never writes outside Mods/Clock,
-  Mods/ClockDriver and those mods.txt lines, and never bundles any of core's files.
+  Installs ue4ss/Mods/Clock/{mod.json, Scripts/main.lua, Scripts/time.lua}. The clock's setting lives in
+  Mods/Clock/settings.json, the values file Nucleus's settings service keeps (Nucleus 0.9.0): -UpdateEvery writes it
+  ({"updateEvery":N}); without it an existing settings.json survives the redeploy untouched (it is the player's).
+  Writes "Clock : 1" into mods.txt right below Nucleus's line and above "Keybinds : 1", moving it there if it was
+  elsewhere. Never writes outside Mods/Clock, Mods/ClockDriver and those mods.txt lines, and never bundles any of
+  core's files.
   -Test also installs the test driver (test/ClockDriver as Mods/ClockDriver, between Nucleus and Clock), writes the
-  scenario to its Scripts/scenario.txt, and turns on the clock's DEBUG lines (settings.lua debug = true), which
-  check.ps1 reads (cost: only the TICK cost lines, settings.lua profile = true). step5 implies -UpdateEvery 5.
+  scenario to its Scripts/scenario.txt, and writes Scripts/dev.lua (test only) to turn on the clock's DEBUG lines
+  (debug = true), which check.ps1 reads (cost: only the TICK cost lines, profile = true). With -Test, step5 implies
+  -UpdateEvery 5 and every other scenario -UpdateEvery 1, so a run never inherits an earlier run's value.
   -Remove deletes Mods/Clock, Mods/ClockDriver and their mods.txt lines; nothing else changes (mods.txt keeps its
   bytes when it had no clock lines).
   -Staged: $Instance is the host-side staging folder of a VM run (run.ps1 -Target vm, tools/vm/vm-sp.ps1), not a game
@@ -95,18 +98,23 @@ if ($problem) {
     Write-Warning "forced: $problem"
 }
 
-# The clock's files, and its settings from mod.json.
+# The clock's files. Its setting: settings.json from -UpdateEvery, else the existing one kept as it was.
 $override = @{}
-if ($Scenario -eq 'step5' -and $Test -and $UpdateEvery -eq 0) { $UpdateEvery = 5 }
+if ($Test -and $UpdateEvery -eq 0) { $UpdateEvery = if ($Scenario -eq 'step5') { 5 } else { 1 } }
 if ($UpdateEvery -gt 0) { $override.updateEvery = $UpdateEvery }
+$settingsJson = ConvertTo-SettingsJson -Manifest $manifest -Override $override
 # cost measures the clock as a normal install runs it: no DEBUG lines, only the TICK cost lines.
-$settings = ConvertTo-SettingsLua -Manifest $manifest -Override $override -DebugLog:($Test -and $Scenario -ne 'cost') -Profile:($Test -and $Scenario -eq 'cost')
+$dev = if ($Test) { ConvertTo-DevLua -DebugLog:($Scenario -ne 'cost') -Profile:($Scenario -eq 'cost') }
+$valuesFile = Join-Path $modsDir "$name\settings.json"
+$keptValues = if (-not $settingsJson -and (Test-Path -LiteralPath $valuesFile -PathType Leaf)) { [IO.File]::ReadAllBytes($valuesFile) }
 foreach ($d in $mine) { Remove-Item (Join-Path $modsDir $d) -Recurse -Force -ErrorAction SilentlyContinue }
 $dest = Join-Path $modsDir "$name\Scripts"
 New-Item -ItemType Directory -Force $dest | Out-Null
 Copy-Item (Join-Path $here 'mod.json') (Join-Path $modsDir $name) -Force
 foreach ($f in $ModScripts) { Copy-Item (Join-Path $here "Scripts\$f") $dest -Force }
-[IO.File]::WriteAllText((Join-Path $dest 'settings.lua'), $settings, [Text.UTF8Encoding]::new($false))
+if ($dev) { [IO.File]::WriteAllText((Join-Path $dest 'dev.lua'), $dev, [Text.UTF8Encoding]::new($false)) }
+if ($settingsJson) { [IO.File]::WriteAllText($valuesFile, $settingsJson, [Text.UTF8Encoding]::new($false)) }
+elseif ($keptValues) { [IO.File]::WriteAllBytes($valuesFile, $keptValues) }
 
 # mods.txt: below core, above Keybinds. The driver goes between core and the clock (its old-core mode must run
 # before the clock's main.lua).
@@ -122,5 +130,5 @@ Write-ModsTxt $modsTxt $file $lines
 
 Write-Host "$name $($manifest.version) deployed$(if ($Test) { " with $driver (scenario $Scenario)" }):"
 Get-ChildItem (Join-Path $modsDir $name) -Recurse -File | ForEach-Object { Write-Host "  Mods/$name/$($_.FullName.Substring((Join-Path $modsDir $name).Length + 1)) ($($_.Length) bytes)" }
-Write-Host "  settings.lua: $(($settings -split "`n")[1])"
+Write-Host "  settings.json: $(if ($settingsJson) { "$settingsJson (written)" } elseif ($keptValues) { 'kept as it was' } else { "none (Nucleus uses mod.json's defaults)" })"
 Write-Host "mods.txt: $(($lines | Where-Object { $_ -match '^\s*[\w-]+\s*:\s*1' }) -join ', ')"
