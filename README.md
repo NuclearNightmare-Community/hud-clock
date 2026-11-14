@@ -4,6 +4,7 @@ A Nuclear Nightmare mod that shows the in-game time as `HH:MM` (24-hour, the Jou
 
 - Scope `client`: each player runs it for themselves. It reads the time from the game's own sky (the replicated copy on a client), sends nothing over the network and reads nothing from other players.
 - Version 0.1.0, built for game V8.1.2 (build 26193463) and UE4SS `v3.0.1-1181-g83330635`. Needs Nucleus `>=0.2.0` (0.2.0, the first core with the UI helpers, or newer). The `>=` form is read by Nucleus 0.5.0 and newer (core story 18); an older core refuses it.
+- License: MIT (`LICENSE`); changes: `CHANGELOG.md`; `build.ps1` stages the release package for the workspace's `tools/release/release.ps1`.
 
 ## Install
 
