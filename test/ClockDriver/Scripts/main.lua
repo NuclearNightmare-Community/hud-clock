@@ -18,6 +18,8 @@
 --   measure:  story 2 part A, as host: Time of Day once a second for 2 min at each Time Speed (1.5, 1.0, 0.5),
 --             UDS's minute event (Check for Time Event Dispatchers / Event Minute), the map's text against the sky's
 --             H/M/S, the wrap at 2400, and which skies FindAllOf sees after each travel.
+--   speed:    story 5, as host: Time of Day and the shown text every 50 ms for 30 s at Fast, then Normal; one
+--             SPEEDSUM line per speed counts the text's changes by step size (check.ps1 judges them).
 -- Keys it can't press itself (Enter for touchdown) go to run.ps1 through request.txt / done.txt next to this file.
 -- Never keeps a UObject across steps: only paths, re-found with StaticFindObject.
 local CORE = "Nucleus"   -- core's name: the one place the driver spells it
@@ -108,9 +110,9 @@ local function hhmm(h, m, n)
     mm = mm - mm % n
     return string.format("%02d:%02d", hh, mm)
 end
--- The clock reads once a second and a game minute lasts 0.56 to 1.67 real s (Day Length 10 + Night Length 10 min
--- at Time Speed 1.5 to 0.5; measure scenario), so the text may trail the sky by up to LAG game minutes.
-local LAG = 3
+-- The clock reads every 250 ms (story 5) and a game minute lasts 0.55 to 1.67 real s (Day Length 10 + Night Length
+-- 10 min at Time Speed 1.5 to 0.5; measure scenario), so the text may trail the sky by up to LAG game minutes.
+local LAG = 1
 local function lagging(text, h, m, n)
     if not (text and h) then return false end
     for d = 0, LAG do if text == hhmm(h, m - d, n) then return true end end
@@ -267,7 +269,7 @@ local function clockShown(phase, n)
         check(type(st.text) == "string" and st.text:match("^%d%d:%d%d$") ~= nil, "FORMAT %s text is HH:MM (%s)", phase, tostring(st.text))
         local h, m = skyHms()
         local want = h and hhmm(h, m, n)
-        -- The clock reads once a second: the sky may have moved on since (LAG).
+        -- The clock reads every 250 ms: the sky may have moved on since (LAG).
         check(want ~= nil and lagging(st.text, h, m, n), "MATCHES %s text %s matches the sky's %s (H/M/S %s:%s)", phase, tostring(st.text), tostring(want), tostring(h), tostring(m))
         if w and hud then checkCorner(phase, w, hud) end
         S.lastText = st.text
@@ -384,7 +386,7 @@ local function buildStep5()
             S.beforeSet = state().text
             s["Time of Day"] = todOf(h, m)
             local since = os.clock()
-            -- The clock reads once a second: give it two.
+            -- The clock reads every 250 ms; 2.2 s leaves room for a slow frame or two.
             return function() return os.clock() - since >= 2.2 end, 5, "step5 wait"
         end)
         step(("match1: shows %s"):format(want), function()
@@ -610,7 +612,7 @@ local function buildCost()
     waitHud("menu1", 60)
     enterMatch("match1")
     costProfile("match1", 200)
-    -- The clock reads once a second, not in a tight loop: the same calls, one per second for 30 s.
+    -- The clock reads every 250 ms, not in a tight loop: the same calls, sampled one per second for 30 s.
     step("match1: cold cost", function()
         local us = _G[CORE .. "_ClockMicros"]
         local T = S.costTime
@@ -638,10 +640,31 @@ local function buildCost()
     idle("match1", IDLE_S)
 end
 
--- ---------------------------------------------------------------- speed (clock story 5 research)
--- As host, Time of Day and the clock's shown text every 50 ms for SPEED_SECONDS at each Time Speed: does the sky move
--- smoothly between the clock's once-a-second reads, and how far does the shown text jump?
+-- ---------------------------------------------------------------- speed (clock story 5)
+-- As host, Time of Day and the clock's shown text every 50 ms for SPEED_SECONDS at each Time Speed (the research run
+-- that found the 1 s read skipping minutes), then one SPEEDSUM line per speed: how many times the text changed, and
+-- by how many minutes (step1, step2, step3plus forward; back for any step backwards). check.ps1 judges it.
 local SPEED_SECONDS = 30
+local function minuteOf(text)
+    local h, m = tostring(text):match("^(%d%d):(%d%d)$")
+    return h and tonumber(h) * 60 + tonumber(m) or nil
+end
+-- Counts one sampled text into acc; a change is the step from the previous sampled HH:MM (around midnight, a step
+-- of more than 12 hours forward is a step back).
+local function countStep(acc, text)
+    local m = minuteOf(text)
+    if m == nil then return end
+    if acc.prev ~= nil and m ~= acc.prev then
+        local d = (m - acc.prev) % 1440
+        acc.changes = acc.changes + 1
+        if d > 720 then acc.back = acc.back + 1
+        elseif d == 1 then acc.step1 = acc.step1 + 1
+        elseif d == 2 then acc.step2 = acc.step2 + 1
+        else acc.step3plus = acc.step3plus + 1 end
+        if d ~= 1 then say("SPEED step speed=%s %s -> %s", acc.name, acc.prevText, text) end
+    end
+    acc.prev, acc.prevText = m, text
+end
 local function buildSpeed()
     waitWorld("menu1", "NewMainMenu", 120)
     waitHud("menu1", 60)
@@ -655,19 +678,25 @@ local function buildSpeed()
             s["Time Speed"] = speed
             say("SPEED start %s Time Speed=%s", name, tostring(s["Time Speed"]))
             local t0, done, loop = os.clock(), false, nil
+            local acc = { name = name, changes = 0, step1 = 0, step2 = 0, step3plus = 0, back = 0 }
             local okL, res = pcall(LoopInGameThreadWithDelay, 50, function()
                 if done then return end
                 pcall(function()
                     local sk = sky()
                     local tod = sk and sk["Time of Day"] or -1
-                    say("SPEED fine speed=%s t=%.3f tod=%.4f text=%s", name, os.clock() - t0, tod, tostring(state().text))
+                    local text = state().text
+                    say("SPEED fine speed=%s t=%.3f tod=%.4f text=%s", name, os.clock() - t0, tod, tostring(text))
+                    countStep(acc, text)
                 end)
             end)
             if okL then loop = res end
+            check(okL, "SPEEDLOOP %s 50 ms sample loop started (%s)", name, okL and "ok" or tostring(res))
             return function()
                 if os.clock() - t0 < SPEED_SECONDS + 1.5 then return false end
                 done = true
                 if loop then pcall(CancelDelayedAction, loop) end
+                say("SPEEDSUM speed=%s changes=%d step1=%d step2=%d step3plus=%d back=%d", name, acc.changes, acc.step1,
+                    acc.step2, acc.step3plus, acc.back)
                 return true
             end, SPEED_SECONDS + 15, "fine " .. name
         end)

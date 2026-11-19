@@ -1,13 +1,14 @@
 -- Clock (spec-clock-v1): the in-game time as HH:MM in the HUD's top-right corner during a match.
 -- Runs on Nucleus (core) through the dependent bootstrap (core's api-contract.md); uses only core's public API
 -- (connect, core.ui.text, core.settings, core.log). Holds no UObject between ticks: the element handle, the last shown
--- boundary and the setting (AGENTS.md). Reads the time once a second on the game thread; changes the text only when the
--- time crosses an updateEvery boundary.
+-- boundary and the setting (AGENTS.md). Reads the time every 250 ms on the game thread (clock story 5: a game minute
+-- lasts 0.55 real s at Fast, so a once-a-second read skipped minutes); changes the text only when the time crosses an
+-- updateEvery boundary, and holds back a 1-2 boundary step back (a client's replication snap).
 local CORE, NEED, ME = "Nucleus", ">=0.9.0", "Clock"
 local ELEMENT = "clock.time"
 local PLACE = { host = "hud", corner = "top-right" }
-local TICK_MS = 1000
-local COST_EVERY = 60 -- ticks per DEBUG cost line
+local TICK_MS = 250 -- under half the shortest game minute (0.55 s at Fast): every minute is read at every speed
+local COST_EVERY = 240 -- ticks per DEBUG cost line: one a minute
 
 local source = debug.getinfo(1, "S").source:gsub("^@", "")
 local scriptDir = source:match("^(.*)[/\\]") or "."
@@ -64,7 +65,7 @@ local function start(core)
     if not okC then log.error("could not create the clock element: %s. %s will not run.", tostring(el), ME) return end
     ui.setVisible(el, false) -- hidden until there's a time to show
 
-    local last         -- the boundary last shown; nil after a hide, so the next value shows at once
+    local last         -- the slot (time.slot) last shown; nil after a hide, so the next value shows at once
     local visible = false
     local warned, nWarned = {}, 0 -- reasons already logged: each read error once, at most 8 different ones
     local cost = { n = 0, sum = 0, max = 0, read = 0, set = 0, sets = 0, log = 0 } -- DEBUG timing, per COST_EVERY ticks
@@ -92,8 +93,10 @@ local function start(core)
         local note, level = time.takeNote()
         if note then log[level == "warn" and "warn" or "info"]("%s", note) end
         if not h then hide(m) return end
-        local b = time.boundary(h, m, n)
-        if b ~= last then
+        local b, perDay = time.slot(h, m, n)
+        -- A new slot shows, except one or two behind the shown one: on a client the sky's once-a-second replication
+        -- snap can step the time back briefly (time.shouldShow).
+        if time.shouldShow(last, b, perDay) then
             local text = time.format(h, m, n)
             local t1 = timing and micros()
             ui.set(el, text)

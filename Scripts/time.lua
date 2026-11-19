@@ -3,6 +3,8 @@
 --   time.read()            -> hour, minute | nil, reason   game thread; re-finds the sky on every call
 --   time.format(h, m, n)   -> "HH:MM"                       minute rounded down to a multiple of n
 --   time.boundary(h, m, n) -> integer                       changes exactly when format's text changes
+--   time.slot(h, m, n)     -> slot, perDay                  the boundary's position in the day, 0..perDay-1
+--   time.shouldShow(last, slot, perDay) -> boolean          show this slot? (holds back a 1-2 slot step back)
 --   time.forget()                                           drop the remembered sky path (after a map change)
 --   time.takeNote()        -> message, level | nil          the once-per-sky conversion check's result, to log
 --   time.useHandles(ref, deref, free)                       keep the sky as a core weak handle instead of a path
@@ -56,6 +58,35 @@ end
 function M.boundary(h, m, n)
     checkArgs("boundary", h, m, n)
     return shownMinuteOfDay(h, m, n)
+end
+
+-- The boundary's position in the day: 0, 1, 2, ... in steps of one shown value, and how many there are a day
+-- (perDay). For an n that divides 60 the slot is the minute of the day // n and perDay is 1440 // n; for any other n
+-- each hour has ceil(60 / n) values (n = 7: :00, :07, ... :56), so the slots stay consecutive across the hour.
+function M.slot(h, m, n)
+    checkArgs("slot", h, m, n)
+    local t = shownMinuteOfDay(h, m, n)
+    local perHour = (60 + n - 1) // n
+    return (t // 60) * perHour + (t % 60) // n, 24 * perHour
+end
+
+-- How far back a new slot may be and still be held back (clock story 5): on a client the sky's once-a-second
+-- replication snaps Time of Day to the host's value with no smoothing, which can step it back by well under a game
+-- minute, so a 1 or 2 slot step back would show a time that goes backwards for a moment. A larger step back (the
+-- 23:59 -> 00:00 wrap is a step forward; the host setting the time back) shows at once.
+local HOLD_BACK = 2
+
+-- shouldShow(last, slot, perDay) -> boolean: true when nothing is shown yet (last nil), or the slot is ahead of last
+-- (counted around the day, so the midnight wrap is ahead), or it is more than HOLD_BACK slots behind; false for the
+-- same slot and for a step back of 1 or 2 slots.
+function M.shouldShow(last, slot, perDay)
+    if math.type(perDay) ~= "integer" or perDay <= 2 * HOLD_BACK then error("time.shouldShow: perDay must be an integer above " .. 2 * HOLD_BACK .. ", got " .. tostring(perDay), 2) end
+    if math.type(slot) ~= "integer" or slot < 0 or slot >= perDay then error("time.shouldShow: slot must be an integer from 0 to perDay - 1, got " .. tostring(slot), 2) end
+    if last == nil then return true end
+    if math.type(last) ~= "integer" or last < 0 or last >= perDay then error("time.shouldShow: last must be nil or an integer from 0 to perDay - 1, got " .. tostring(last), 2) end
+    local ahead = (slot - last) % perDay
+    if ahead == 0 then return false end
+    return perDay - ahead > HOLD_BACK
 end
 
 -- ---------------------------------------------------------------- the one game call

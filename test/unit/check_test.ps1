@@ -158,6 +158,30 @@ if ($r.Code -eq 0 -and $r.Out -match 'MEASURE Normal: 20 samples, 0\.5000 Time o
 else { $script:failed++; Write-Host "FAIL measure: summary"; Write-Host $r.Out }
 Expect ($measure | Where-Object { $_ -notmatch 'speed=Long' }) 'measure' 1 'measure: no Long samples fails'
 
+# ---------------------------------------------------------------- speed (story 5; allowed in the VM)
+function Speed-Log([string] $fast, [string] $normal) {
+    $l = (Start-Log) + (Running 1 'speed') + @(
+        (L 'ClockDriver' "OK MATCHES match1 text 10:05 matches the sky's 10:05 (H/M/S 10:5)"),
+        (L 'ClockDriver' 'OK SPEEDLOOP Fast 50 ms sample loop started (ok)'),
+        (L 'ClockDriver' 'SPEED fine speed=Fast t=0.050 tod=650.0000 text=06:30'),
+        (L 'ClockDriver' 'SPEED fine speed=Normal t=0.050 tod=750.0000 text=07:30'))
+    if ($fast) { $l += L 'ClockDriver' "SPEEDSUM speed=Fast $fast" }
+    if ($normal) { $l += L 'ClockDriver' "SPEEDSUM speed=Normal $normal" }
+    return $l + (End-Log)
+}
+$fastOk = 'changes=54 step1=54 step2=0 step3plus=0 back=0'
+$normalOk = 'changes=35 step1=34 step2=1 step3plus=0 back=0'
+Expect (Speed-Log $fastOk $normalOk) 'speed' 0 'speed: passes' 'SPEED Fast: 54 changes, 54 by \+1'
+Expect (Speed-Log $fastOk $normalOk) 'speed' 0 'vm speed: passes (not refused)' 'All checks passed' 'vm'
+Expect (Speed-Log $fastOk 'changes=35 step1=31 step2=4 step3plus=0 back=0') 'speed' 1 'speed: under 90% +1 fails' 'FAIL: SPEED Normal'
+Expect (Speed-Log $fastOk 'changes=35 step1=32 step2=3 step3plus=0 back=0') 'speed' 0 'speed: exactly 32 of 35 (91%) passes' 'All checks passed'
+Expect (Speed-Log 'changes=54 step1=53 step2=0 step3plus=1 back=0' $normalOk) 'speed' 1 'speed: a step of 3 fails' 'FAIL: SPEED Fast'
+Expect (Speed-Log 'changes=54 step1=53 step2=0 step3plus=0 back=1' $normalOk) 'speed' 1 'speed: a step back fails' 'FAIL: SPEED Fast'
+Expect (Speed-Log 'changes=0 step1=0 step2=0 step3plus=0 back=0' $normalOk) 'speed' 1 'speed: no change fails' 'FAIL: SPEED Fast'
+Expect (Speed-Log $fastOk '') 'speed' 1 'speed: no Normal summary fails' 'no SPEEDSUM line'
+# The research run's 1 s reads (+2 x22, +1 x6, +3 x1 at Fast) fail.
+Expect (Speed-Log 'changes=29 step1=6 step2=22 step3plus=1 back=0' $normalOk) 'speed' 1 'speed: the old 1 s read fails' 'FAIL: SPEED Fast'
+
 # ---------------------------------------------------------------- hand
 $hand = (Start-Log) + @((L 'Clock' 'CONNECT ok Nucleus 0.2.0 (pong 0.2.0 boot=1)'), (L 'Clock' 'READY updateEvery=1 element=clock.time'),
     (L 'Clock' "ui attach 'clock.time' created /Engine/Transient.WBP_NucleusText_C_1 (HUD appeared)"), (L 'Clock' 'VISIBLE 07:42 (updateEvery=1)'),

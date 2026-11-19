@@ -116,6 +116,55 @@ raises(function() time.format(10, 0, 61) end, "n must be an integer from 1 to 60
 raises(function() time.format(10, 0, 1.5) end, "n must be an integer from 1 to 60", "format: n=1.5")
 raises(function() time.boundary(10, 0, "5") end, "time.boundary: n must be an integer", "boundary: string n")
 
+-- ---------------------------------------------------------------- slot and shouldShow (story 5)
+-- slot: consecutive positions in the day, one per shown value; equal exactly when boundary is.
+for _, n in ipairs({ 1, 2, 5, 7, 13, 15, 59, 60 }) do
+    local _, perDay = time.slot(0, 0, n)
+    local prev, steps, wrong, mismatch = nil, 0, 0, 0
+    local prevB
+    for t = 0, 1439 do
+        local h, m = t // 60, t % 60
+        local s, pd = time.slot(h, m, n)
+        local b = time.boundary(h, m, n)
+        if pd ~= perDay or s < 0 or s >= perDay then wrong = wrong + 1 end
+        if prev ~= nil then
+            if (s ~= prev) ~= (b ~= prevB) then mismatch = mismatch + 1 end
+            if s ~= prev then steps = steps + 1; if s ~= prev + 1 then wrong = wrong + 1 end end
+        end
+        prev, prevB = s, b
+    end
+    eq(prev, perDay - 1, "slot n=" .. n .. ": the day's last slot is perDay - 1")
+    eq(steps, perDay - 1, "slot n=" .. n .. ": every slot of the day is used once")
+    eq(wrong, 0, "slot n=" .. n .. ": consecutive, in range")
+    eq(mismatch, 0, "slot n=" .. n .. ": changes exactly when boundary does")
+end
+do
+    local s, pd = time.slot(23, 59, 1); ok(s == 1439 and pd == 1440, "slot n=1: 23:59 -> 1439 of 1440", s .. " " .. pd)
+    s, pd = time.slot(23, 59, 5); ok(s == 287 and pd == 288, "slot n=5: 23:59 -> 287 of 288", s .. " " .. pd)
+    s, pd = time.slot(24, 0, 5); ok(s == 0 and pd == 288, "slot n=5: 24:00 wraps to 0", s .. " " .. pd)
+    raises(function() time.slot(10, 0, 0) end, "time.slot: n must be an integer from 1 to 60", "slot: n=0")
+end
+-- shouldShow: nil, same, ahead, 1-2 behind held back, 3 behind shown, the midnight wrap, a forced jump.
+eq(time.shouldShow(nil, 600, 1440), true, "shouldShow: nothing shown yet -> show")
+eq(time.shouldShow(600, 600, 1440), false, "shouldShow: same slot -> no change")
+eq(time.shouldShow(600, 601, 1440), true, "shouldShow: +1 -> show")
+eq(time.shouldShow(600, 599, 1440), false, "shouldShow: -1 -> held back (client snap)")
+eq(time.shouldShow(600, 598, 1440), false, "shouldShow: -2 -> held back (client snap)")
+eq(time.shouldShow(600, 597, 1440), true, "shouldShow: -3 -> show (time set back)")
+eq(time.shouldShow(1439, 0, 1440), true, "shouldShow: wrap 1439 -> 0 with n=1 -> show")
+eq(time.shouldShow(287, 0, 288), true, "shouldShow: wrap 287 -> 0 with n=5 -> show")
+eq(time.shouldShow(0, 1439, 1440), false, "shouldShow: 0 -> 1439 is one back across midnight -> held back")
+eq(time.shouldShow(1, 1439, 1440), false, "shouldShow: 1 -> 1439 is two back across midnight -> held back")
+eq(time.shouldShow(1, 1438, 1440), true, "shouldShow: 1 -> 1438 is three back across midnight -> show")
+eq(time.shouldShow(600, 720, 1440), true, "shouldShow: +120 -> show")
+eq(time.shouldShow(1400, 80, 1440), true, "shouldShow: +120 across midnight -> show")
+eq(time.shouldShow(120, 0, 288), true, "shouldShow: n=5 far back -> show")
+eq(time.shouldShow(120, 119, 288), false, "shouldShow: n=5 one slot back -> held back")
+raises(function() time.shouldShow(600, 1440, 1440) end, "time.shouldShow: slot must be an integer from 0 to perDay - 1", "shouldShow: slot out of range")
+raises(function() time.shouldShow(600, 1.5, 1440) end, "time.shouldShow: slot must be", "shouldShow: fractional slot")
+raises(function() time.shouldShow("600", 601, 1440) end, "time.shouldShow: last must be nil or an integer", "shouldShow: string last")
+raises(function() time.shouldShow(600, 601, 4) end, "time.shouldShow: perDay must be an integer above 4", "shouldShow: tiny perDay")
+
 -- ---------------------------------------------------------------- read (story 2, AC 4 and 5)
 do
     firstSky = nil
