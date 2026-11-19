@@ -17,6 +17,7 @@ For players: with "update every 1 minute" the clock now counts every minute. Bef
 
 - The DEBUG/profile `TICK` cost line covers 240 ticks (still one a minute).
 - New test scenario `speed` (`run.ps1 -Scenario speed`, also in the VM): the text and the sky every 50 ms at Fast and Normal; it passes when at least 90% of the changes are +1 minute and none is 3 or more or backwards.
+- New two-player scenario `clock-client` (`test/pair/clock-scenarios.ps1`, run by the workspace's `tools/vm/pair.ps1`): the clock on a client, whose text must never step back; judged by `check.ps1 -Scenario pair-client`.
 
 ## [0.2.0] - 2026-11-14
 

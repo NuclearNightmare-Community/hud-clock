@@ -93,6 +93,17 @@ The driver (`test/ClockDriver/`, installed as `Mods/ClockDriver` between Nucleus
 - In the VM: `match`, `step5`, `rebuild`, `no-core`, `old-core`, `speed` (it judges step sizes, not cost). Host only: `cost` and `measure` (they judge tick costs and real time; refused with `-Target vm`). `check.ps1 -Target vm` makes the one timing assertion inside the functional scenarios soft: core's `WARN hud slow tick ... steady state` under the clock's tag shows as `warn:` instead of failing. The read-tick cost is soft outside `cost` anyway.
 - Builds still happen on the host (Nucleus's `build.ps1` is CPU-heavy: the game you're playing may stutter meanwhile), and the VM's game itself shares the host's CPU and GPU.
 
+### Two players: the clock on a client (story 5)
+
+`test/pair/clock-scenarios.ps1` adds `clock-client` to the workspace's pair tooling (`tools/vm/pair.ps1`; `tools/vm/README.md`). The host (this PC) makes a friends-only lobby and stays unmodded; B (the VM, a client) has Nucleus, Clock and the driver in role `pair-client`. Once B is in the match and its HUD shows, the driver samples B's clock text and B's own (replicated) sky every 50 ms for 120 s and logs one `PAIRSUM` line; `check.ps1 -Scenario pair-client -Target vm` passes when no text change goes backwards, none is 3 minutes or more, and at least 90% are +1, and it prints how often B's sky stepped back. From the main checkout, with Nucleus built, the VM lock taken and no game running on the host:
+
+```powershell
+./tools/vm/pair.ps1 -Scenario clock-client -ScenarioFile mods/clock/test/pair/clock-scenarios.ps1
+./tools/vm/pair.ps1 -Stop -Scenario clock-client -ScenarioFile mods/clock/test/pair/clock-scenarios.ps1   # after an aborted run
+```
+
+Run on 2026-11-19 (V8.2.3, Normal speed): 144 changes, all +1, none back. B's sky stepped back 5 times in 2,042 samples (the once-a-second replication snap; at most 0.062 `Time of Day` units, about 2 game seconds), and none of those crossed a minute, so the 1-2 minute hold-back had nothing to hold back on a LAN; its logic is covered by the unit tests.
+
 ### Measuring how the game advances time (story 2, part A)
 
 `./run.ps1 -Instance $copy -Scenario measure` (about 10 minutes, as host). The driver logs, once a second for 2 real minutes at each `Time Speed` (Fast 1.5, Normal 1.0, Long 0.5), `Time of Day`, the sky's H/M/S and the Journal map's own text (`MapWidget_C.GetText_0`, when the widget exists); every change of the sky's `Event Minute` (what UDS's `Every Minute` broadcasts, from `Check for Time Event Dispatchers`); 30 s across the wrap at 2400; and which skies exist after each travel. `check.ps1 -Scenario measure` prints real seconds per game minute per speed, jumps, and how many map samples differed from H/M/S. To answer the four questions:
@@ -126,3 +137,4 @@ Afterwards `./check.ps1 -Instance $copy -Scenario hand` checks the log: connecte
 | `check.ps1`, `run.ps1`, `test.ps1` | Judge a log, run a scenario, run the unit tests |
 | `test/ClockDriver/` | The test driver (never shipped) |
 | `test/unit/` | Unit tests |
+| `test/pair/clock-scenarios.ps1` | The `clock-client` two-player scenario for the workspace's `tools/vm/pair.ps1` |
