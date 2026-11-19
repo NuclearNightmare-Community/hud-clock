@@ -102,7 +102,7 @@ Ok ((ConvertTo-DevLua -DebugLog) -match '(?m)^return \{ debug = true \}$') 'dev.
 Ok ((ConvertTo-DevLua -Profile) -match '(?m)^return \{ profile = true \}$') 'dev.lua: -Profile'
 Eq $m.settings.updateEvery.label 'Update every N game minutes' 'mod.json: the setting has its label'
 Eq $m.settings.updateEvery.changeable 'anytime' 'mod.json: changeable anytime'
-Ok ($m.id -eq 'nuclearnightmare-community.clock' -and $m.name -eq 'Clock' -and $m.version -eq '0.2.0' -and $m.scope -eq 'client') 'mod.json: id, name, version, scope'
+Ok ($m.id -eq 'nuclearnightmare-community.clock' -and $m.name -eq 'Clock' -and $m.version -eq '0.2.1' -and $m.scope -eq 'client') 'mod.json: id, name, version, scope'
 Ok ($m.dependsOn[0].id -eq 'nuclearnightmare-community.nucleus' -and $m.dependsOn[0].version -eq '>=0.9.0') 'mod.json: dependsOn nuclearnightmare-community.nucleus >=0.9.0 (a minimum, core story 18; core.settings)'
 Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.2.3' -and $m.game.build -eq '26601774') 'mod.json: ue4ss and game build'
 # The runtime need in main.lua equals dependsOn's minimum.

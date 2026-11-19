@@ -26,14 +26,14 @@
   game is launched, Enter is pressed there with tools/vm/vm-key.ps1, and the VM copy is put back as it was
   afterwards. It never builds and never touches the host's game copy or a host game, so it can run while someone
   plays on the host. The log is kept as <scenario>.vm.log and judged with check.ps1 -Target vm. measure and cost
-  (timing) are host-only.
+  (timing) are host-only; speed (story 5: the text's step sizes at Fast and Normal) runs in the VM too.
 .EXAMPLE
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario match
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario no-core -Target vm
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost')]
+    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost', 'speed')]
     [string] $Scenario = 'match',
     [int] $TimeoutSec = 0, # 0: per scenario (match 720, measure 1200, others 480); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host',

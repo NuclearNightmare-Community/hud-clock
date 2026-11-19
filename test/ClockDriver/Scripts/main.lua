@@ -18,6 +18,11 @@
 --   measure:  story 2 part A, as host: Time of Day once a second for 2 min at each Time Speed (1.5, 1.0, 0.5),
 --             UDS's minute event (Check for Time Event Dispatchers / Event Minute), the map's text against the sky's
 --             H/M/S, the wrap at 2400, and which skies FindAllOf sees after each travel.
+--   speed:    story 5, as host: Time of Day and the shown text every 50 ms for 30 s at Fast, then Normal; one
+--             SPEEDSUM line per speed counts the text's changes by step size (check.ps1 judges them).
+--   pair-client: story 5, B in a pair run (test/pair/clock-scenarios.ps1): never travels or presses keys; once in the
+--             host's match it samples the clock's text and its own (replicated) sky every 50 ms for 120 s and logs
+--             one PAIRSUM line: the text's steps (none may go back) and how often the sky stepped back.
 -- Keys it can't press itself (Enter for touchdown) go to run.ps1 through request.txt / done.txt next to this file.
 -- Never keeps a UObject across steps: only paths, re-found with StaticFindObject.
 local CORE = "Nucleus"   -- core's name: the one place the driver spells it
@@ -108,12 +113,14 @@ local function hhmm(h, m, n)
     mm = mm - mm % n
     return string.format("%02d:%02d", hh, mm)
 end
--- The clock reads once a second and a game minute lasts 0.56 to 1.67 real s (Day Length 10 + Night Length 10 min
--- at Time Speed 1.5 to 0.5; measure scenario), so the text may trail the sky by up to LAG game minutes.
-local LAG = 3
-local function lagging(text, h, m, n)
+-- The clock reads every 250 ms (story 5) and a game minute lasts 0.55 to 1.67 real s (Day Length 10 + Night Length
+-- 10 min at Time Speed 1.5 to 0.5; measure scenario), so the text may trail the sky by up to LAG game minutes.
+local LAG = 1
+-- lead: on a client the clock may also be up to 2 minutes ahead of its sky for a moment (it holds back the sky's
+-- replication snap; clock story 5), so a client check passes lead = 2.
+local function lagging(text, h, m, n, lead)
     if not (text and h) then return false end
-    for d = 0, LAG do if text == hhmm(h, m - d, n) then return true end end
+    for d = -(lead or 0), LAG do if text == hhmm(h, m - d, n) then return true end end
     return false
 end
 -- Time of Day for hour:minute, a fifth of the way into the minute (so a frozen sky never sits on a boundary).
@@ -256,7 +263,7 @@ end
 
 -- ---------------------------------------------------------------- clock checks
 -- Waits until the clock is drawn, then checks it: one widget, HH:MM matching the sky, top-right.
-local function clockShown(phase, n)
+local function clockShown(phase, n, lead)
     step(phase .. ": clock drawn", function()
         return function() return state().drawn end, 15, phase .. " clock drawn"
     end)
@@ -267,8 +274,8 @@ local function clockShown(phase, n)
         check(type(st.text) == "string" and st.text:match("^%d%d:%d%d$") ~= nil, "FORMAT %s text is HH:MM (%s)", phase, tostring(st.text))
         local h, m = skyHms()
         local want = h and hhmm(h, m, n)
-        -- The clock reads once a second: the sky may have moved on since (LAG).
-        check(want ~= nil and lagging(st.text, h, m, n), "MATCHES %s text %s matches the sky's %s (H/M/S %s:%s)", phase, tostring(st.text), tostring(want), tostring(h), tostring(m))
+        -- The clock reads every 250 ms: the sky may have moved on since (LAG).
+        check(want ~= nil and lagging(st.text, h, m, n, lead), "MATCHES %s text %s matches the sky's %s (H/M/S %s:%s)", phase, tostring(st.text), tostring(want), tostring(h), tostring(m))
         if w and hud then checkCorner(phase, w, hud) end
         S.lastText = st.text
     end)
@@ -384,7 +391,7 @@ local function buildStep5()
             S.beforeSet = state().text
             s["Time of Day"] = todOf(h, m)
             local since = os.clock()
-            -- The clock reads once a second: give it two.
+            -- The clock reads every 250 ms; 2.2 s leaves room for a slow frame or two.
             return function() return os.clock() - since >= 2.2 end, 5, "step5 wait"
         end)
         step(("match1: shows %s"):format(want), function()
@@ -610,7 +617,7 @@ local function buildCost()
     waitHud("menu1", 60)
     enterMatch("match1")
     costProfile("match1", 200)
-    -- The clock reads once a second, not in a tight loop: the same calls, one per second for 30 s.
+    -- The clock reads every 250 ms, not in a tight loop: the same calls, sampled one per second for 30 s.
     step("match1: cold cost", function()
         local us = _G[CORE .. "_ClockMicros"]
         local T = S.costTime
@@ -638,8 +645,149 @@ local function buildCost()
     idle("match1", IDLE_S)
 end
 
-local build = ({ cost = buildCost, match = buildMatch, step5 = buildStep5, rebuild = buildRebuild, ["no-core"] = buildNoClock,
-                 ["old-core"] = buildNoClock, measure = buildMeasure })[SCENARIO]
+-- ---------------------------------------------------------------- speed (clock story 5)
+-- As host, Time of Day and the clock's shown text every 50 ms for SPEED_SECONDS at each Time Speed (the research run
+-- that found the 1 s read skipping minutes), then one SPEEDSUM line per speed: how many times the text changed, and
+-- by how many minutes (step1, step2, step3plus forward; back for any step backwards). check.ps1 judges it.
+local SPEED_SECONDS = 30
+-- Hour and minute of a Time of Day, by the sky's own formula (time.lua's hmFromTod).
+local function hhOf(tod)
+    local x = (tod % 2400) / 100
+    local h = math.floor(x)
+    return h, math.floor((x - h) * 60)
+end
+local function minuteOf(text)
+    local h, m = tostring(text):match("^(%d%d):(%d%d)$")
+    return h and tonumber(h) * 60 + tonumber(m) or nil
+end
+-- Counts one sampled text into acc; a change is the step from the previous sampled HH:MM (around midnight, a step
+-- of more than 12 hours forward is a step back).
+local function countStep(acc, text)
+    local m = minuteOf(text)
+    if m == nil then return end
+    if acc.prev ~= nil and m ~= acc.prev then
+        local d = (m - acc.prev) % 1440
+        acc.changes = acc.changes + 1
+        if d > 720 then acc.back = acc.back + 1
+        elseif d == 1 then acc.step1 = acc.step1 + 1
+        elseif d == 2 then acc.step2 = acc.step2 + 1
+        else acc.step3plus = acc.step3plus + 1 end
+        if d ~= 1 then say("SPEED step speed=%s %s -> %s", acc.name, acc.prevText, text) end
+    end
+    acc.prev, acc.prevText = m, text
+end
+local function buildSpeed()
+    waitWorld("menu1", "NewMainMenu", 120)
+    waitHud("menu1", 60)
+    enterMatch("match1")
+    clockShown("match1", 1)
+    for _, sp in ipairs({ { "Fast", 1.5 }, { "Normal", 1.0 } }) do
+        local name, speed = sp[1], sp[2]
+        step("match1: fine " .. name, function()
+            local s = sky()
+            if not s then return end
+            s["Time Speed"] = speed
+            say("SPEED start %s Time Speed=%s", name, tostring(s["Time Speed"]))
+            local t0, done, loop = os.clock(), false, nil
+            local acc = { name = name, changes = 0, step1 = 0, step2 = 0, step3plus = 0, back = 0 }
+            local okL, res = pcall(LoopInGameThreadWithDelay, 50, function()
+                if done then return end
+                pcall(function()
+                    local sk = sky()
+                    local tod = sk and sk["Time of Day"] or -1
+                    local text = state().text
+                    say("SPEED fine speed=%s t=%.3f tod=%.4f text=%s", name, os.clock() - t0, tod, tostring(text))
+                    countStep(acc, text)
+                end)
+            end)
+            if okL then loop = res end
+            check(okL, "SPEEDLOOP %s 50 ms sample loop started (%s)", name, okL and "ok" or tostring(res))
+            return function()
+                if os.clock() - t0 < SPEED_SECONDS + 1.5 then return false end
+                done = true
+                if loop then pcall(CancelDelayedAction, loop) end
+                say("SPEEDSUM speed=%s changes=%d step1=%d step2=%d step3plus=%d back=%d", name, acc.changes, acc.step1,
+                    acc.step2, acc.step3plus, acc.back)
+                return true
+            end, SPEED_SECONDS + 15, "fine " .. name
+        end)
+    end
+end
+
+-- ---------------------------------------------------------------- pair-client (clock story 5, in a pair run)
+-- B joins the host's friends-only lobby (pair.ps1); B's sky is a client copy: the host replicates Time of Day once a
+-- second and OnRep snaps B's value to it, so B's time can step back a little. The clock holds back a step back of 1-2
+-- minutes; this samples what B's HUD shows against B's sky. Nothing is sent; only this machine's own state is read.
+local PAIR_SECONDS = 120
+local function buildPairClient()
+    step("pair: in a match", function()
+        return function()
+            -- The join passes through /Game/Maps/Startup/GraphicsWarmup first (pair run 2026-11-19): not a match.
+            local w = worldName()
+            if w ~= "" and not w:find("NewMainMenu", 1, true) and not w:find("GraphicsWarmup", 1, true) and sky() then
+                say("WORLD pair %s", w:match("/Game/[^ ]+") or "?")
+                return true
+            end
+            return false
+        end, 900, "pair world (joined the host's match)"
+    end)
+    waitHud("pair", 120)
+    -- The game hides the HUD during the lobby countdown: wait for it to be drawn (the countdown, then touchdown).
+    step("pair: wait for the HUD to show", function()
+        return function() return state().drawn end, 300, "pair clock drawn after the lobby"
+    end)
+    clockShown("pair", 1, 2)
+    step("pair: sample", function()
+        local s = sky()
+        say("PAIR start Time Speed=%s replicated=%s", tostring(s and s["Time Speed"]), tostring(s and s["Replicated Time of Day"]))
+        local t0, done, loop = os.clock(), false, nil
+        local acc = { name = "client", changes = 0, step1 = 0, step2 = 0, step3plus = 0, back = 0 }
+        local sk = { n = 0, back = 0, backMinute = 0, ahead = 0, maxBack = 0 }
+        local okL, res = pcall(LoopInGameThreadWithDelay, 50, function()
+            if done then return end
+            pcall(function()
+                local s2 = sky()
+                local tod = s2 and s2["Time of Day"]
+                local text = state().text
+                if type(tod) ~= "number" then return end
+                sk.n = sk.n + 1
+                -- A step back of the sky between two samples (not the wrap at 2400): the replication snap.
+                if sk.prev and tod < sk.prev and sk.prev - tod < 1200 then
+                    sk.back = sk.back + 1
+                    if sk.prev - tod > sk.maxBack then sk.maxBack = sk.prev - tod end
+                    local h1, m1 = hhOf(sk.prev); local h2, m2 = hhOf(tod)
+                    if h1 * 60 + m1 ~= h2 * 60 + m2 then
+                        sk.backMinute = sk.backMinute + 1
+                        say("PAIR sky back %.4f -> %.4f (%02d:%02d -> %02d:%02d), text %s", sk.prev, tod, h1, m1, h2, m2, tostring(text))
+                    end
+                end
+                sk.prev = tod
+                -- The text ahead of the sky: the clock holding a value the sky stepped back from.
+                local tm = minuteOf(text)
+                if tm then
+                    local h, m = hhOf(tod)
+                    local d = (tm - (h * 60 + m)) % 1440
+                    if d >= 1 and d <= 2 then sk.ahead = sk.ahead + 1 end
+                end
+                countStep(acc, text)
+            end)
+        end)
+        if okL then loop = res end
+        check(okL, "PAIRLOOP 50 ms sample loop started (%s)", okL and "ok" or tostring(res))
+        return function()
+            if os.clock() - t0 < PAIR_SECONDS then return false end
+            done = true
+            if loop then pcall(CancelDelayedAction, loop) end
+            say("PAIRSUM changes=%d step1=%d step2=%d step3plus=%d back=%d samples=%d skyBack=%d skyBackMinute=%d maxSkyBack=%.4f heldAhead=%d",
+                acc.changes, acc.step1, acc.step2, acc.step3plus, acc.back, sk.n, sk.back, sk.backMinute, sk.maxBack, sk.ahead)
+            return true
+        end, PAIR_SECONDS + 15, "pair sample"
+    end)
+    clockShown("pair-end", 1, 2)
+end
+
+local build = ({ cost = buildCost, ["pair-client"] = buildPairClient, match = buildMatch, step5 = buildStep5, rebuild = buildRebuild, ["no-core"] = buildNoClock,
+                 ["old-core"] = buildNoClock, measure = buildMeasure, speed = buildSpeed })[SCENARIO]
 if not build then
     say("END result=FAIL checks=0 failures=1 reason=unknown-scenario %s", SCENARIO)
     return

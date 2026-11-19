@@ -158,6 +158,48 @@ if ($r.Code -eq 0 -and $r.Out -match 'MEASURE Normal: 20 samples, 0\.5000 Time o
 else { $script:failed++; Write-Host "FAIL measure: summary"; Write-Host $r.Out }
 Expect ($measure | Where-Object { $_ -notmatch 'speed=Long' }) 'measure' 1 'measure: no Long samples fails'
 
+# ---------------------------------------------------------------- speed (story 5; allowed in the VM)
+function Speed-Log([string] $fast, [string] $normal) {
+    $l = (Start-Log) + (Running 1 'speed') + @(
+        (L 'ClockDriver' "OK MATCHES match1 text 10:05 matches the sky's 10:05 (H/M/S 10:5)"),
+        (L 'ClockDriver' 'OK SPEEDLOOP Fast 50 ms sample loop started (ok)'),
+        (L 'ClockDriver' 'SPEED fine speed=Fast t=0.050 tod=650.0000 text=06:30'),
+        (L 'ClockDriver' 'SPEED fine speed=Normal t=0.050 tod=750.0000 text=07:30'))
+    if ($fast) { $l += L 'ClockDriver' "SPEEDSUM speed=Fast $fast" }
+    if ($normal) { $l += L 'ClockDriver' "SPEEDSUM speed=Normal $normal" }
+    return $l + (End-Log)
+}
+$fastOk = 'changes=54 step1=54 step2=0 step3plus=0 back=0'
+$normalOk = 'changes=35 step1=34 step2=1 step3plus=0 back=0'
+Expect (Speed-Log $fastOk $normalOk) 'speed' 0 'speed: passes' 'SPEED Fast: 54 changes, 54 by \+1'
+Expect (Speed-Log $fastOk $normalOk) 'speed' 0 'vm speed: passes (not refused)' 'All checks passed' 'vm'
+Expect (Speed-Log $fastOk 'changes=35 step1=31 step2=4 step3plus=0 back=0') 'speed' 1 'speed: under 90% +1 fails' 'FAIL: SPEED Normal'
+Expect (Speed-Log $fastOk 'changes=35 step1=32 step2=3 step3plus=0 back=0') 'speed' 0 'speed: exactly 32 of 35 (91%) passes' 'All checks passed'
+Expect (Speed-Log 'changes=54 step1=53 step2=0 step3plus=1 back=0' $normalOk) 'speed' 1 'speed: a step of 3 fails' 'FAIL: SPEED Fast'
+Expect (Speed-Log 'changes=54 step1=53 step2=0 step3plus=0 back=1' $normalOk) 'speed' 1 'speed: a step back fails' 'FAIL: SPEED Fast'
+Expect (Speed-Log 'changes=0 step1=0 step2=0 step3plus=0 back=0' $normalOk) 'speed' 1 'speed: no change fails' 'FAIL: SPEED Fast'
+Expect (Speed-Log $fastOk '') 'speed' 1 'speed: no Normal summary fails' 'no SPEEDSUM line'
+# The research run's 1 s reads (+2 x22, +1 x6, +3 x1 at Fast) fail.
+Expect (Speed-Log 'changes=29 step1=6 step2=22 step3plus=1 back=0' $normalOk) 'speed' 1 'speed: the old 1 s read fails' 'FAIL: SPEED Fast'
+
+# ---------------------------------------------------------------- pair-client (story 5, B's log from a pair run)
+function Pair-Log([string] $sum) {
+    $l = (Start-Log) + (Running 1 'pair-client') + @(
+        (L 'ClockDriver' 'WORLD pair /Game/Maps/SmallLoweIsland/SmallMap.SmallMap'),
+        (L 'ClockDriver' 'OK ONE pair exactly one clock widget (found 1)'),
+        (L 'ClockDriver' "OK MATCHES pair text 10:05 matches the sky's 10:05 (H/M/S 10:5)"),
+        (L 'ClockDriver' "OK MATCHES pair-end text 12:05 matches the sky's 12:05 (H/M/S 12:5)"))
+    if ($sum) { $l += L 'ClockDriver' "PAIRSUM $sum" }
+    return $l + (End-Log)
+}
+$pairOk = 'changes=140 step1=140 step2=0 step3plus=0 back=0 samples=2400 skyBack=110 skyBackMinute=1 maxSkyBack=0.0420 heldAhead=3'
+Expect (Pair-Log $pairOk) 'pair-client' 0 'pair-client: passes, sky summary printed' 'PAIR client sky: 2400 samples, 110 steps back'
+Expect (Pair-Log $pairOk) 'pair-client' 0 'vm pair-client: passes' 'All checks passed' 'vm'
+Expect (Pair-Log ($pairOk -replace 'back=0 samples', 'back=1 samples')) 'pair-client' 1 'pair-client: a text step back fails' 'FAIL: PAIR client text'
+Expect (Pair-Log ($pairOk -replace 'step3plus=0', 'step3plus=1')) 'pair-client' 1 'pair-client: a step of 3 fails' 'FAIL: PAIR client text'
+Expect (Pair-Log '') 'pair-client' 1 'pair-client: no PAIRSUM fails'
+Expect ((Pair-Log $pairOk) | Where-Object { $_ -notmatch 'MATCHES pair-end' }) 'pair-client' 1 'pair-client: no end check fails'
+
 # ---------------------------------------------------------------- hand
 $hand = (Start-Log) + @((L 'Clock' 'CONNECT ok Nucleus 0.2.0 (pong 0.2.0 boot=1)'), (L 'Clock' 'READY updateEvery=1 element=clock.time'),
     (L 'Clock' "ui attach 'clock.time' created /Engine/Transient.WBP_NucleusText_C_1 (HUD appeared)"), (L 'Clock' 'VISIBLE 07:42 (updateEvery=1)'),

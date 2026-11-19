@@ -2,6 +2,23 @@
 
 All notable changes to Clock are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-11-19
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635. Needs Nucleus 0.9.0 or newer (`>=0.9.0`).
+
+For players: with "update every 1 minute" the clock now counts every minute. Before, it skipped minutes at the Fast and Normal day/night speeds (10:01, 10:03, 10:05, ...).
+
+### Fixed
+
+- The time is read every 250 ms instead of once a second. A game minute lasts 0.55 real s at Fast and 0.84 s at Normal, so the 1 s read skipped most minutes; the sky itself moves every frame (story 5). The text still changes only when the shown value does, and the read tick stays within the 0.1 ms budget.
+- A step back of one or two shown values is held back, so a client's once-a-second sky correction from the host can't make the time tick backwards for a moment. A bigger step back (the host setting the time back) and the midnight wrap show at once.
+
+### Changed
+
+- The DEBUG/profile `TICK` cost line covers 240 ticks (still one a minute).
+- New test scenario `speed` (`run.ps1 -Scenario speed`, also in the VM): the text and the sky every 50 ms at Fast and Normal; it passes when at least 90% of the changes are +1 minute and none is 3 or more or backwards.
+- New two-player scenario `clock-client` (`test/pair/clock-scenarios.ps1`, run by the workspace's `tools/vm/pair.ps1`): the clock on a client, whose text must never step back; judged by `check.ps1 -Scenario pair-client`.
+
 ## [0.2.0] - 2026-11-14
 
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635. Needs Nucleus 0.9.0 or newer (`>=0.9.0`).

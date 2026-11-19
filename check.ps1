@@ -6,14 +6,19 @@
   A pattern must match somewhere; "!pattern" must match nowhere; "#N|pattern" must match exactly N lines;
   "?pattern" is a soft check (reported as "warn:", never failing); "?!pattern" is a soft check that it matches nowhere.
   Then the scenario's computed checks: READY after CONNECT ok, the read-tick cost (story 3 AC 5: average under
-  0.1 ms per tick), every shown value a multiple of updateEvery, and for measure, a summary of story 2 part A.
+  0.1 ms per tick), every shown value a multiple of updateEvery, for measure a summary of story 2 part A, and for
+  speed (story 5) the text's steps at Fast and Normal from the driver's SPEEDSUM lines: at least 90% of the changes
+  +1 minute, none of 3 or more, none backwards; for pair-client (story 5, B's log from a pair run,
+  test/pair/clock-scenarios.ps1) the client's text steps from the PAIRSUM line: none backwards, none of 3 or more,
+  at least 90% +1, with the sky's own steps back reported.
   Exit code 1 when any check fails; otherwise prints "All checks passed."
-  Scenarios: match, step5, rebuild, no-core, old-core, measure (run.ps1 drives them), and hand (a log from the
+  Scenarios: match, step5, rebuild, no-core, old-core, measure, cost, speed (run.ps1 drives them), and hand (a log from the
   README's hand check: only that the clock connected, showed a time and logged no error). unit needs no log: it runs
   test.ps1 (story 2 AC 2's pure tests and the rest of the unit tests).
   -Target vm judges a log from run.ps1 -Target vm. The VM's game shares the CPU with the host, so the one timing
   assertion inside the functional scenarios, "no hud slow tick in steady state" (core's WARN under the clock's tag),
-  is a soft check there; the read-tick cost is already soft outside cost. measure and cost are refused (host-only).
+  is a soft check there; the read-tick cost is already soft outside cost. measure and cost are refused (host-only);
+  speed is allowed there, since it judges step sizes, not cost.
 .EXAMPLE
   ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\clock\match.log -Scenario match
   ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario hand
@@ -22,7 +27,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost', 'hand', 'unit')]
+    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost', 'hand', 'unit', 'speed', 'pair-client')]
     [string] $Scenario = 'match',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
@@ -44,7 +49,7 @@ if (-not (Test-Path $Log)) { Write-Host "FAIL: no log at $Log"; exit 1 }
 $lines = @(Get-Content $Log)
 Write-Host "--- $name lines ($Scenario) ---"
 $lines | Where-Object {
-    ($_ -match "\[$C\]|\[$D\]" -and $_ -notmatch "\[$D\] MEASURE sample|\[$C\] (DEBUG )?(SHOW|TICK|hud)") -or
+    ($_ -match "\[$C\]|\[$D\]" -and $_ -notmatch "\[$D\] (MEASURE sample|SPEED fine)|\[$C\] (DEBUG )?(SHOW|TICK|hud)") -or
     $_ -match 'Error executing script|threw an exception|removing hook|Unhandled Exception|stack traceback|\[script_hook\]'
 } | ForEach-Object { $_ -replace '^\[[^\]]+\]\s*', '' -replace '^\[Lua\]\s*', '' }
 
@@ -128,6 +133,17 @@ $expect = @{
         "\[$D\] END result=PASS"
         "?\[$D\] MEASURE minute-event "
     )
+    # Story 5: the text's steps at Fast and Normal (judged below from the SPEEDSUM lines).
+    'speed' = $driven + @(
+        "\[$D\] OK MATCHES match1 "
+        "\[$D\] SPEED fine speed=Fast ", "\[$D\] SPEED fine speed=Normal "
+        "#1|\[$D\] SPEEDSUM speed=Fast ", "#1|\[$D\] SPEEDSUM speed=Normal "
+    )
+    # Story 5, B in a pair run: the client's text never steps back although its sky may (judged below from PAIRSUM).
+    'pair-client' = $driven + @(
+        "\[$D\] OK MATCHES pair ", "\[$D\] OK MATCHES pair-end ", "\[$D\] OK ONE pair exactly one"
+        "#1|\[$D\] PAIRSUM "
+    )
     'hand' = $running
     # Diagnostic: what each engine call of a clock read costs (COST lines); only that the probe ran.
     # What each engine call of a clock read costs (COST lines), then the clock as a normal install runs it (no DEBUG
@@ -161,12 +177,12 @@ foreach ($pattern in ($always + $expect[$Scenario])) {
 
 function IndexOf([string] $p) { for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match $p) { return $i } } return -1 }
 
-if ($Scenario -in 'match', 'step5', 'rebuild', 'hand') {
+if ($Scenario -in 'match', 'step5', 'rebuild', 'hand', 'speed', 'pair-client') {
     # Story 1 AC 1: READY after CONNECT ok.
     $ic, $ir = (IndexOf "\[$C\] CONNECT ok "), (IndexOf "\[$C\] READY ")
     if ($ic -ge 0 -and $ir -gt $ic) { Pass 'READY comes after CONNECT ok' } else { Fail "READY comes after CONNECT ok (CONNECT at line $ic, READY at line $ir)" }
 }
-if ($Scenario -in 'match', 'step5', 'rebuild', 'cost') {
+if ($Scenario -in 'match', 'step5', 'rebuild', 'cost', 'speed') {
     # Story 3 AC 5: a read tick averages under 0.1 ms. Each DEBUG TICK line covers n ticks; "log" is the time spent
     # writing the DEBUG SHOW lines themselves, which a normal install (no debug) doesn't do, so it's left out.
     $ticks = @($lines | Where-Object { $_ -match "\[$C\] (DEBUG )?TICK n=\d+ avg " } | ForEach-Object {
@@ -188,7 +204,7 @@ if ($Scenario -in 'match', 'step5', 'rebuild', 'cost') {
         if ($max -gt 1000) { Write-Host "warn: a read tick took $max us (over 1 ms; includes DEBUG lines and any Lua GC step)"; $warned++ }
     }
 }
-if ($Scenario -in 'match', 'step5', 'rebuild') {
+if ($Scenario -in 'match', 'step5', 'rebuild', 'speed', 'pair-client') {
     # Every shown value is a multiple of updateEvery minutes (step5: of 5).
     $shown = @($lines | Where-Object { $_ -match "\[$C\] DEBUG SHOW (\d\d):(\d\d)\s*$" } | ForEach-Object { [void]($_ -match 'SHOW (\d\d):(\d\d)\s*$'); "$($Matches[1]):$($Matches[2])" })
     $bad = @($shown | Where-Object { [int]$_.Substring(3) % $every -ne 0 -or [int]$_.Substring(0, 2) -gt 23 })
@@ -199,6 +215,33 @@ if ($Scenario -in 'match', 'step5', 'rebuild') {
     for ($i = 1; $i -lt $shown.Count; $i++) { if ($shown[$i] -eq $shown[$i - 1]) { $repeats++ } }
     # A repeat is legitimate only right after a reset (no sky, or a new match at the same minute); report, don't fail.
     if ($repeats) { Write-Host "warn: $repeats SHOW value(s) repeated the previous one (expected only after a hide)"; $warned++ }
+}
+if ($Scenario -eq 'speed') {
+    # Story 5: with reads every 250 ms every game minute is read at Fast (0.55 s) and Normal (0.84 s), so the text
+    # steps by one minute; a 2-minute step needs a frame stalled over about 0.3 s (allowed up to 10%), a 3-minute or
+    # backward step is a fault.
+    foreach ($speed in 'Fast', 'Normal') {
+        $sum = @($lines | Where-Object { $_ -match "\[$D\] SPEEDSUM speed=$speed changes=(\d+) step1=(\d+) step2=(\d+) step3plus=(\d+) back=(\d+)" })
+        if (-not $sum) { Fail "SPEED $speed has no SPEEDSUM line"; continue }
+        [void]($sum[-1] -match "changes=(\d+) step1=(\d+) step2=(\d+) step3plus=(\d+) back=(\d+)")
+        $k, $s1, $s2, $s3, $back = [int]$Matches[1], [int]$Matches[2], [int]$Matches[3], [int]$Matches[4], [int]$Matches[5]
+        $pct = if ($k) { 100.0 * $s1 / $k } else { 0 }
+        $label = "SPEED {0}: {1} changes, {2} by +1 ({3:N1}%, need >= 90%), {4} by +2, {5} by 3 or more, {6} backwards" -f $speed, $k, $s1, $pct, $s2, $s3, $back
+        if ($k -gt 0 -and $s1 -ge 0.9 * $k -and $s3 -eq 0 -and $back -eq 0) { Pass $label } else { Fail $label }
+    }
+}
+if ($Scenario -eq 'pair-client') {
+    $sum = @($lines | Where-Object { $_ -match "\[$D\] PAIRSUM changes=\d+ " })
+    if ($sum -and $sum[-1] -match 'changes=(\d+) step1=(\d+) step2=(\d+) step3plus=(\d+) back=(\d+) samples=(\d+) skyBack=(\d+) skyBackMinute=(\d+) maxSkyBack=([\d.]+) heldAhead=(\d+)') {
+        $k, $s1, $s2, $s3, $back = [int]$Matches[1], [int]$Matches[2], [int]$Matches[3], [int]$Matches[4], [int]$Matches[5]
+        $pct = if ($k) { 100.0 * $s1 / $k } else { 0 }
+        $label = "PAIR client text: {0} changes, {1} by +1 ({2:N1}%, need >= 90%), {3} by +2, {4} by 3 or more, {5} backwards" -f $k, $s1, $pct, $s2, $s3, $back
+        if ($k -gt 0 -and $s1 -ge 0.9 * $k -and $s3 -eq 0 -and $back -eq 0) { Pass $label } else { Fail $label }
+        # Informational: how often the client's own sky stepped back (the replication snap) and whether a step crossed
+        # a minute, which is what the hold-back is for; heldAhead counts samples with the text 1-2 minutes ahead of it.
+        Write-Host ("PAIR client sky: {0} samples, {1} steps back (max {2} Time of Day units), {3} across a minute, text held ahead in {4} samples" -f
+            $Matches[6], $Matches[7], $Matches[9], $Matches[8], $Matches[10])
+    } else { Fail 'PAIR client has no complete PAIRSUM line' }
 }
 if ($Scenario -eq 'measure') {
     # Story 2 part A, question 1: real seconds per game minute at each speed, from a straight-line fit of Time of Day

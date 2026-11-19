@@ -30,7 +30,7 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost')]
+    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost', 'speed', 'pair-client')]
     [string] $Scenario = 'match',
     [ValidateRange(0, 60)] [int] $UpdateEvery = 0,  # 0: mod.json's default
     [switch] $Force,
