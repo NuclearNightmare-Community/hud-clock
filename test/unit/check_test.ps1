@@ -119,7 +119,7 @@ $rebuild = (Start-Log) + (Running 1 'rebuild') + @(
     (L 'ClockDriver' 'REBUILD match1 RemoveAllWidgets (HUD /Engine/Transient.InventoryUI_C_1)'), (L 'ClockDriver' 'REBUILD match1 AddToViewport(0)'),
     (L 'Clock' "DEBUG ui attach 'clock.time' reused /Engine/Transient.WBP_NucleusText_C_1 (HUD back in the viewport)"),
     (L 'ClockDriver' 'OK ONE match1-rebuilt exactly one clock widget (found 1)'), (L 'ClockDriver' 'OK CORNER match1-rebuilt clock in the top-right corner')) + (End-Log)
-Expect $rebuild 'rebuild' 0 'rebuild: passes (DEBUG attach line, core cbbca96)' 'All checks passed'
+Expect $rebuild 'rebuild' 0 'rebuild: passes (DEBUG attach line, core ac57c5c)' 'All checks passed'
 Expect ($rebuild -replace 'DEBUG ui attach', 'ui attach') 'rebuild' 0 'rebuild: an INFO attach line (older core) passes too' 'All checks passed'
 Expect ($rebuild | Where-Object { $_ -notmatch "reused" }) 'rebuild' 1 'rebuild: no reuse fails'
 Expect ($rebuild + (L 'Clock' "WARN text 'clock.time': removed 1 duplicate widget(s) from the HUD canvas")) 'rebuild' 1 'rebuild: a duplicate fails'

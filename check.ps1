@@ -69,7 +69,7 @@ $running = @(
     "\[$C\] CONNECT ok $K \d+\.\d+\.\d+ "
     "#1|\[$C\] READY updateEvery=$every element=clock\.time\s*$"
     "\[$C\] VISIBLE \d\d:\d\d \(updateEvery=$every\)"
-    # Core logs attaches at DEBUG since Nucleus cbbca96 (INFO only for an element left pending), so the line shows only
+    # Core logs attaches at DEBUG since Nucleus ac57c5c (INFO only for an element left pending), so the line shows only
     # with the clock's DEBUG lines on (deploy -Test); soft. A pending clock element would be an INFO line: never.
     "?\[$C\] (DEBUG )?ui attach (.*, )?'clock\.time' (created|reused) "
     "!\[$C\] ui attach left .*'clock\.time'"
