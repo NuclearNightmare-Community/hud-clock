@@ -33,7 +33,7 @@
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost')]
+    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost', 'speed')]
     [string] $Scenario = 'match',
     [int] $TimeoutSec = 0, # 0: per scenario (match 720, measure 1200, others 480); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host',

@@ -22,7 +22,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost', 'hand', 'unit')]
+    [ValidateSet('match', 'step5', 'rebuild', 'no-core', 'old-core', 'measure', 'cost', 'hand', 'unit', 'speed')]
     [string] $Scenario = 'match',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
@@ -128,6 +128,7 @@ $expect = @{
         "\[$D\] END result=PASS"
         "?\[$D\] MEASURE minute-event "
     )
+    'speed' = @("\[$D\] SPEED fine speed=Fast ", "\[$D\] SPEED fine speed=Normal ", "\[$D\] END result=PASS")
     'hand' = $running
     # Diagnostic: what each engine call of a clock read costs (COST lines); only that the probe ran.
     # What each engine call of a clock read costs (COST lines), then the clock as a normal install runs it (no DEBUG

@@ -638,8 +638,44 @@ local function buildCost()
     idle("match1", IDLE_S)
 end
 
+-- ---------------------------------------------------------------- speed (clock story 5 research)
+-- As host, Time of Day and the clock's shown text every 50 ms for SPEED_SECONDS at each Time Speed: does the sky move
+-- smoothly between the clock's once-a-second reads, and how far does the shown text jump?
+local SPEED_SECONDS = 30
+local function buildSpeed()
+    waitWorld("menu1", "NewMainMenu", 120)
+    waitHud("menu1", 60)
+    enterMatch("match1")
+    clockShown("match1", 1)
+    for _, sp in ipairs({ { "Fast", 1.5 }, { "Normal", 1.0 } }) do
+        local name, speed = sp[1], sp[2]
+        step("match1: fine " .. name, function()
+            local s = sky()
+            if not s then return end
+            s["Time Speed"] = speed
+            say("SPEED start %s Time Speed=%s", name, tostring(s["Time Speed"]))
+            local t0, done, loop = os.clock(), false, nil
+            local okL, res = pcall(LoopInGameThreadWithDelay, 50, function()
+                if done then return end
+                pcall(function()
+                    local sk = sky()
+                    local tod = sk and sk["Time of Day"] or -1
+                    say("SPEED fine speed=%s t=%.3f tod=%.4f text=%s", name, os.clock() - t0, tod, tostring(state().text))
+                end)
+            end)
+            if okL then loop = res end
+            return function()
+                if os.clock() - t0 < SPEED_SECONDS + 1.5 then return false end
+                done = true
+                if loop then pcall(CancelDelayedAction, loop) end
+                return true
+            end, SPEED_SECONDS + 15, "fine " .. name
+        end)
+    end
+end
+
 local build = ({ cost = buildCost, match = buildMatch, step5 = buildStep5, rebuild = buildRebuild, ["no-core"] = buildNoClock,
-                 ["old-core"] = buildNoClock, measure = buildMeasure })[SCENARIO]
+                 ["old-core"] = buildNoClock, measure = buildMeasure, speed = buildSpeed })[SCENARIO]
 if not build then
     say("END result=FAIL checks=0 failures=1 reason=unknown-scenario %s", SCENARIO)
     return
