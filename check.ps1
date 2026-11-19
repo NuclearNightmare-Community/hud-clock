@@ -12,7 +12,8 @@
   test/pair/clock-scenarios.ps1) the client's text steps from the PAIRSUM line: none backwards, none of 3 or more,
   at least 90% +1, with the sky's own steps back reported.
   Exit code 1 when any check fails; otherwise prints "All checks passed."
-  Scenarios: match, step5, rebuild, no-core, old-core, measure, cost, speed (run.ps1 drives them), and hand (a log from the
+  Scenarios: match, step5, rebuild, no-core, old-core, measure, cost, speed (run.ps1 drives them), pair-client (B's log
+  from a pair run, test/pair/clock-scenarios.ps1), and hand (a log from the
   README's hand check: only that the clock connected, showed a time and logged no error). unit needs no log: it runs
   test.ps1 (story 2 AC 2's pure tests and the rest of the unit tests).
   -Target vm judges a log from run.ps1 -Target vm. The VM's game shares the CPU with the host, so the one timing
