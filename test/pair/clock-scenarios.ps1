@@ -53,9 +53,11 @@ $script:ClockPairScenarios = @{
             Invoke-VMDeploy -Path $s.Driver, $s.Clock
         }
         VMRestore = {
-            $s = Get-ClockStage
-            Invoke-VMDeploy -Remove -Path $s.Clock, $s.Driver, $s.Core
-            Restore-VMBaseline
+            # The baseline (UE4SS off, no mods) is restored even if staging or the removal fails.
+            try {
+                $s = Get-ClockStage
+                Invoke-VMDeploy -Remove -Path $s.Clock, $s.Driver, $s.Core
+            } finally { Restore-VMBaseline }
         }
         AfterJoin = {
             Save-ShotAt -Seconds 60 -Name 'clock' -Expect 'B in the match with the clock (HH:MM) in the HUD''s top-right corner'
