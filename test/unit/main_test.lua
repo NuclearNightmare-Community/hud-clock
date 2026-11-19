@@ -411,25 +411,30 @@ do -- Clock story 5: a step back of 1 or 2 shown values is held back (a client's
     ok(#s == 1 and s[1] == "23:58", "after LoadMap the next value shows at once, even one behind", s[1])
 end
 
--- Fast: 3.0 Time of Day units a real second, read every 0.25 s (0.75 units a tick). Every change is +n.
-for _, n in ipairs({ 1, 5 }) do
-    boot()
-    local core = newCore{ every = n }
-    local U = core.ui
-    connect(core)
-    local t = tod(10, 0)
-    W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", t)
-    local i = #U.calls
-    for _ = 1, 400 do t = t + 0.75; W.sky["Time of Day"] = t; tick() end
-    local shown = callsSince(U, i, "set")
-    local bad = 0
-    for k = 2, #shown do
-        local a, b = shown[k - 1], shown[k]
-        local ma = tonumber(a:sub(1, 2)) * 60 + tonumber(a:sub(4, 5))
-        local mb = tonumber(b:sub(1, 2)) * 60 + tonumber(b:sub(4, 5))
-        if (mb - ma) % 1440 ~= n then bad = bad + 1 end
+-- Each lobby speed, read every 0.25 s: Fast 3.0 Time of Day units a real second (0.75 a tick), Normal 2.0 (0.5),
+-- Long 1.0 (0.25); a game minute is 100/60 units. Every change is +n.
+for _, sp in ipairs({ { "Fast", 0.75 }, { "Normal", 0.5 }, { "Long", 0.25 } }) do
+    for _, n in ipairs({ 1, 5 }) do
+        boot()
+        local core = newCore{ every = n }
+        local U = core.ui
+        connect(core)
+        local t = tod(10, 0)
+        W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", t)
+        local i = #U.calls
+        for _ = 1, 400 do t = t + sp[2]; W.sky["Time of Day"] = t; tick() end
+        local shown = callsSince(U, i, "set")
+        local bad = 0
+        for k = 2, #shown do
+            local a, b = shown[k - 1], shown[k]
+            local ma = tonumber(a:sub(1, 2)) * 60 + tonumber(a:sub(4, 5))
+            local mb = tonumber(b:sub(1, 2)) * 60 + tonumber(b:sub(4, 5))
+            if (mb - ma) % 1440 ~= n then bad = bad + 1 end
+        end
+        local minutes = math.floor(400 * sp[2] * 60 / 100)
+        ok(#shown >= (minutes - 1) // n and bad == 0, "n=" .. n .. " at " .. sp[1] .. ", 250 ms reads: every change is +" .. n,
+            ("%d changes, %d not +%d"):format(#shown, bad, n))
     end
-    ok(#shown >= 180 // n and bad == 0, "n=" .. n .. " at Fast, 250 ms reads: every change is +" .. n, ("%d changes, %d not +%d"):format(#shown, bad, n))
 end
 
 do -- A watched change applies at the next tick (changeable "anytime"): one SETTING line, the new rounding at once.
