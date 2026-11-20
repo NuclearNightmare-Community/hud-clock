@@ -1,9 +1,9 @@
--- Load test for the test driver (test/ClockDriver/Scripts/main.lua) outside the game: for every scenario it loads,
+-- Load test for the test driver (test/HudClockDriver/Scripts/main.lua) outside the game: for every scenario it loads,
 -- builds its steps, registers one game-thread loop and runs a few ticks against an empty fake world (no player
 -- controller yet) without a step throwing. The scenarios themselves only run in game (run.ps1).
 -- Run from the repo root:  texlua test/unit/driver_test.lua
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
-local DIR = ROOT .. "/test/ClockDriver/Scripts"
+local DIR = ROOT .. "/test/HudClockDriver/Scripts"
 local MAIN = DIR .. "/main.lua"
 
 local passed, failed = 0, 0
@@ -30,8 +30,8 @@ for _, sc in ipairs({ "match", "step5", "rebuild", "no-core", "old-core", "measu
     ok(okL, sc .. ": loads", err)
     local loaded, scen
     for _, l in ipairs(printed) do
-        if l:find("^%[ClockDriver%] LOADED %d+ steps$") then loaded = l end
-        if l == "[ClockDriver] SCENARIO " .. sc then scen = l end
+        if l:find("^%[HudClockDriver%] LOADED %d+ steps$") then loaded = l end
+        if l == "[HudClockDriver] SCENARIO " .. sc then scen = l end
     end
     ok(scen ~= nil, sc .. ": logs its scenario")
     ok(loaded ~= nil and tonumber(loaded:match("(%d+) steps")) > 3, sc .. ": builds steps", loaded)

@@ -1,9 +1,9 @@
--- ClockDriver: the clock's test driver (clock story 4). Installed only by deploy.ps1 -Test, never shipped; the clock
+-- HudClockDriver: the clock's test driver (clock story 4). Installed only by deploy.ps1 -Test, never shipped; the clock
 -- itself carries no test code. Plain UE4SS Lua: it doesn't connect to core (no-core runs without it), and it can't
 -- reach the clock's Lua state, so it judges the clock by what is on the HUD: the clock's widget, found in the live
--- InventoryUI_C canvas by core's tag (ToolTipText "<core>:Clock:clock.time"), its text, its visibility and the HUD's.
+-- InventoryUI_C canvas by core's tag (ToolTipText "<core>:HudClock:clock.time"), its text, its visibility and the HUD's.
 --
--- mods.txt order (deploy.ps1): <Core>, ClockDriver, Clock. The driver's main.lua runs before the clock's, which
+-- mods.txt order (deploy.ps1): <Core>, HudClockDriver, HudClock. The driver's main.lua runs before the clock's, which
 -- old-core needs.
 --
 -- Scenarios (Scripts/scenario.txt, written by deploy.ps1):
@@ -12,7 +12,7 @@
 --   step5:    (deploy -UpdateEvery 5) in a match, time frozen and set to chosen minutes: the clock shows each
 --             minute rounded down to 5 and changes only at multiples of 5.
 --   rebuild:  in a match, RemoveAllWidgets and re-add the HUD: the clock is drawn again, one widget.
---   no-core:  (run.ps1 moves core aside) in a match: no clock widget; the [Clock] line is judged by check.ps1.
+--   no-core:  (run.ps1 moves core aside) in a match: no clock widget; the [HudClock] line is judged by check.ps1.
 --   old-core: (run.ps1 sets core's installed mod.json to 0.1.0) publishes that version as <core>.version before the
 --             clock connects, as an old core would; in a match: no clock widget.
 --   measure:  story 2 part A, as host: Time of Day once a second for 2 min at each Time Speed (1.5, 1.0, 0.5),
@@ -20,16 +20,16 @@
 --             H/M/S, the wrap at 2400, and which skies FindAllOf sees after each travel.
 --   speed:    story 5, as host: Time of Day and the shown text every 50 ms for 30 s at Fast, then Normal; one
 --             SPEEDSUM line per speed counts the text's changes by step size (check.ps1 judges them).
---   pair-client: story 5, B in a pair run (test/pair/clock-scenarios.ps1): never travels or presses keys; once in the
+--   pair-client: story 5, B in a pair run (test/pair/hud-clock-scenarios.ps1): never travels or presses keys; once in the
 --             host's match it samples the clock's text and its own (replicated) sky every 50 ms for 120 s and logs
 --             one PAIRSUM line: the text's steps (none may go back) and how often the sky stepped back.
 -- Keys it can't press itself (Enter for touchdown) go to run.ps1 through request.txt / done.txt next to this file.
 -- Never keeps a UObject across steps: only paths, re-found with StaticFindObject.
 local CORE = "Nucleus"   -- core's name: the one place the driver spells it
-local CLOCK = "Clock"    -- the clock's connect name (its log tag and its tag's mod part)
+local CLOCK = "HudClock"    -- the clock's connect name (its log tag and its tag's mod part)
 local ELEMENT = "clock.time"
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
-local ME = "ClockDriver"
+local ME = "HudClockDriver"
 
 local function say(fmt, ...) print("[" .. ME .. "] " .. string.format(fmt, ...) .. "\n") end
 

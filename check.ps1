@@ -9,11 +9,11 @@
   0.1 ms per tick), every shown value a multiple of updateEvery, for measure a summary of story 2 part A, and for
   speed (story 5) the text's steps at Fast and Normal from the driver's SPEEDSUM lines: at least 90% of the changes
   +1 minute, none of 3 or more, none backwards; for pair-client (story 5, B's log from a pair run,
-  test/pair/clock-scenarios.ps1) the client's text steps from the PAIRSUM line: none backwards, none of 3 or more,
+  test/pair/hud-clock-scenarios.ps1) the client's text steps from the PAIRSUM line: none backwards, none of 3 or more,
   at least 90% +1, with the sky's own steps back reported.
   Exit code 1 when any check fails; otherwise prints "All checks passed."
   Scenarios: match, step5, rebuild, no-core, old-core, measure, cost, speed (run.ps1 drives them), pair-client (B's log
-  from a pair run, test/pair/clock-scenarios.ps1), and hand (a log from the
+  from a pair run, test/pair/hud-clock-scenarios.ps1), and hand (a log from the
   README's hand check: only that the clock connected, showed a time and logged no error). unit needs no log: it runs
   test.ps1 (story 2 AC 2's pure tests and the rest of the unit tests).
   -Target vm judges a log from run.ps1 -Target vm. The VM's game shares the CPU with the host, so the one timing
@@ -21,9 +21,9 @@
   is a soft check there; the read-tick cost is already soft outside cost. measure and cost are refused (host-only);
   speed is allowed there, since it judges step sizes, not cost.
 .EXAMPLE
-  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\clock\match.log -Scenario match
+  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\hud-clock\match.log -Scenario match
   ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario hand
-  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\clock\match.vm.log -Scenario match -Target vm
+  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\hud-clock\match.vm.log -Scenario match -Target vm
 #>
 param(
     [string] $Instance,

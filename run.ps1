@@ -11,11 +11,11 @@
   <seq> to done.txt.
   Scenarios that break core on purpose put it back afterwards, also after a crash or Ctrl+C (and at the start of the
   next run if this one was killed):
-    no-core:  moves Mods/Nucleus to ue4ss/_clock-test-backup/ and takes its line out of mods.txt.
+    no-core:  moves Mods/Nucleus to ue4ss/_hud-clock-test-backup/ and takes its line out of mods.txt.
     old-core: sets the installed Nucleus mod.json version to 0.1.0 (the driver publishes it as core's runtime version,
               since a real 0.1.0 core has no UI helpers to build).
   Both first check that deploy.ps1 refuses without -Force (story 1 AC 2 and 3), then deploy with -Force.
-  Keeps the log as <workspace>/dumps/<copy>/clock/<scenario>.log (ignored by git) and runs check.ps1 on it.
+  Keeps the log as <workspace>/dumps/<copy>/hud-clock/<scenario>.log (ignored by git) and runs check.ps1 on it.
   Refuses to start while another runner's test or driver mod is enabled in the copy (the workspace's tools/run-guard:
   the refusal names each and the command that clears it); -AllowOtherDrivers runs anyway.
   Core must already be installed (Nucleus's own deploy.ps1). Steam must be running. Don't type into the game while
@@ -44,12 +44,14 @@ $hostTimeout = switch ($Scenario) { 'match' { 720 } 'measure' { 1200 } default {
 if ($TimeoutSec -le 0 -and $Target -eq 'host') { $TimeoutSec = $hostTimeout }
 $CoreName = 'Nucleus'
 $here     = $PSScriptRoot
-$name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).name
+$manifest = Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json
+$name     = $manifest.name
 $driver   = "${name}Driver"
 $inst     = (Resolve-Path $Instance).Path
 $root     = Split-Path (Split-Path $inst)
 . (Join-Path $root 'tools\run-guard\run-guard.ps1')
-$outDir   = Join-Path $root "dumps\$(Split-Path $inst -Leaf)\$($name.ToLowerInvariant())"
+# The dumps folder is the id's mod part (hud-clock), like the release file names.
+$outDir   = Join-Path $root "dumps\$(Split-Path $inst -Leaf)\$(($manifest.id -split '\.')[-1])"
 # Where deploy.ps1 and Break-Core/Restore-Core work: the instance, or with -Target vm the host-side staging folder.
 function Set-DeployTarget([string] $instance) {
     $script:deployInst = $instance
@@ -58,13 +60,13 @@ function Set-DeployTarget([string] $instance) {
     $script:modsTxt  = Join-Path $script:modsDir 'mods.txt'
     $script:log      = Join-Path $script:ue4ss 'UE4SS.log'
     $script:scripts  = Join-Path $script:modsDir "$driver\Scripts"
-    $script:backup   = Join-Path $script:ue4ss '_clock-test-backup'
+    $script:backup   = Join-Path $script:ue4ss '_hud-clock-test-backup'
 }
 Set-DeployTarget $inst
 $exeName  = 'NuclearNightmare-Win64-Shipping'
 New-Item -ItemType Directory -Force $outDir | Out-Null
 
-Add-Type -Namespace ClockRun -Name Win -MemberDefinition @'
+Add-Type -Namespace HudClockRun -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr h, uint msg, System.IntPtr w, System.IntPtr l);
 '@
 
@@ -81,9 +83,9 @@ function Invoke-Request([string] $cmd) {
         $p = Get-OurGame
         $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
         if ($h -eq [IntPtr]::Zero) { Write-Host '  key skipped: no game window'; return }
-        $down = [ClockRun.Win]::PostMessage($h, 0x0100, [IntPtr]0x0D, [IntPtr]0x001C0001)            # WM_KEYDOWN, VK_RETURN, scan 0x1C
+        $down = [HudClockRun.Win]::PostMessage($h, 0x0100, [IntPtr]0x0D, [IntPtr]0x001C0001)            # WM_KEYDOWN, VK_RETURN, scan 0x1C
         Start-Sleep -Milliseconds 80
-        $up = [ClockRun.Win]::PostMessage($h, 0x0101, [IntPtr]0x0D, [IntPtr]([int64]0xC01C0001))   # WM_KEYUP
+        $up = [HudClockRun.Win]::PostMessage($h, 0x0101, [IntPtr]0x0D, [IntPtr]([int64]0xC01C0001))   # WM_KEYUP
         Write-Host ("  posted ENTER to the game window (down={0} up={1})" -f $down, $up)
     } else { Write-Host "  unknown request: $cmd" }
 }
@@ -166,7 +168,7 @@ if ($Target -eq 'vm') {
         $run = Invoke-NNBSpRun -Instance $inst -TestMod $driver -Mods $CoreName, $driver, $name -Paks "$CoreName.pak" `
             -EndPattern "\[$driver\] END result=" -TimeoutSec (Get-NNBSpTimeout $hostTimeout $TimeoutSec) -LogOut $kept -Prepare {
                 param($stage)
-                $refusal = Get-RunGuardRefusal -Workspace $root -Instance $stage -Owner 'clock' -Bypass:$AllowOtherDrivers -Vm
+                $refusal = Get-RunGuardRefusal -Workspace $root -Instance $stage -Owner 'hud-clock' -Bypass:$AllowOtherDrivers -Vm
                 if ($refusal) { throw $refusal }
                 & pwsh -NoProfile -NonInteractive -File $coreDeploy -Instance $stage -Staged
                 if ($LASTEXITCODE -ne 0) { throw "$CoreName's deploy.ps1 failed in the stage (exit $LASTEXITCODE)" }
@@ -184,7 +186,7 @@ if ($Target -eq 'vm') {
 }
 
 # A test mod another runner left enabled would fail this run in confusing ways.
-$refusal = Get-RunGuardRefusal -Workspace $root -Instance $inst -Owner 'clock' -Bypass:$AllowOtherDrivers
+$refusal = Get-RunGuardRefusal -Workspace $root -Instance $inst -Owner 'hud-clock' -Bypass:$AllowOtherDrivers
 if ($refusal) { Write-Host $refusal; exit 1 }
 if (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue) { throw 'Nuclear Nightmare is already running (a dev copy or the real game); not launching.' }
 Restore-Core # a run that was killed may have left core broken

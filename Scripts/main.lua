@@ -1,10 +1,10 @@
--- Clock (spec-clock-v1): the in-game time as HH:MM in the HUD's top-right corner during a match.
+-- HudClock (spec-clock-v1): the in-game time as HH:MM in the HUD's top-right corner during a match.
 -- Runs on Nucleus (core) through the dependent bootstrap (core's api-contract.md); uses only core's public API
 -- (connect, core.ui.text, core.settings, core.log). Holds no UObject between ticks: the element handle, the last shown
 -- boundary and the setting (AGENTS.md). Reads the time every 250 ms on the game thread (clock story 5: a game minute
 -- lasts 0.55 real s at Fast, so a once-a-second read skipped minutes); changes the text only when the time crosses an
 -- updateEvery boundary, and holds back a 1-2 boundary step back (a client's replication snap).
-local CORE, NEED, ME = "Nucleus", ">=0.9.0", "Clock"
+local CORE, NEED, ME = "Nucleus", ">=0.9.0", "HudClock"
 local ELEMENT = "clock.time"
 local PLACE = { host = "hud", corner = "top-right" }
 local TICK_MS = 250 -- under half the shortest game minute (0.55 s at Fast): every minute is read at every speed
@@ -23,7 +23,7 @@ local time = require("time")
 
 -- ---------------------------------------------------------------- settings
 -- updateEvery comes from Nucleus's settings service (core.settings, Nucleus 0.9.0): declared in mod.json, its value
--- kept by Nucleus in Mods/Clock/settings.json (written by deploy.ps1 -UpdateEvery, later by the Mod Manager), read in
+-- kept by Nucleus in Mods/HudClock/settings.json (written by deploy.ps1 -UpdateEvery, later by the Mod Manager), read in
 -- onReady and watched, so a change shows at the next tick (changeable "anytime").
 local UPDATE_DEFAULT = 1
 local function validEvery(n) return math.type(n) == "integer" and n >= 1 and n <= 60 end
@@ -171,6 +171,6 @@ client.connect{
         local okR, err = pcall(start, core)
         if not okR then print(("[%s] ERROR start failed: %s\n"):format(ME, tostring(err))) end
     end,
-    -- connect has already logged the one line naming the cause (CAP-3: exactly one [Clock] line). Nothing to add.
+    -- connect has already logged the one line naming the cause (CAP-3: exactly one [HudClock] line). Nothing to add.
     onFail = function() end,
 }
