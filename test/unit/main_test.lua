@@ -39,7 +39,7 @@ function LoopAsync() W.async = W.async + 1 end
 function ExecuteInGameThread() W.async = W.async + 1 end
 print = function(s) W.printed[#W.printed + 1] = (tostring(s):gsub("\n$", "")) end
 
--- core's logger shape (nucleus.log): one line per call, "[Clock] LEVEL msg".
+-- core's logger shape (nucleus.log): one line per call, "[HudClock] LEVEL msg".
 local function newLog(tag)
     local L = { debugEnabled = false }
     local function emit(level, fmt, ...) print("[" .. tag .. "] " .. level .. string.format(fmt, ...) .. "\n") end
@@ -115,7 +115,7 @@ end
 local function newCore(o)
     o = o or {}
     local now = 0
-    local core = { name = "Nucleus", version = "0.9.0", log = newLog("Clock") }
+    local core = { name = "Nucleus", version = "0.9.0", log = newLog("HudClock") }
     if o.ui ~= false then core.ui = newUi() end
     if o.settings ~= false then
         W.watchers = {}
@@ -138,23 +138,23 @@ local function lines(pat) local r = {} for _, l in ipairs(W.printed) do if l:fin
 local function callsSince(U, i, name) local r = {} for k = i + 1, #U.calls do if U.calls[k][1] == name then r[#r + 1] = U.calls[k][2] end end return r end
 
 -- ---------------------------------------------------------------- bootstrap (story 1)
-do -- Core not installed: exactly one [Clock] line, the bootstrap's own; nothing else happens.
+do -- Core not installed: exactly one [HudClock] line, the bootstrap's own; nothing else happens.
     boot{ client = false }
     eq(#W.printed, 1, "no core: exactly one line")
-    eq(W.printed[1], "[Clock] Nucleus is not installed. Clock will not run.", "no core: the line names the cause")
+    eq(W.printed[1], "[HudClock] Nucleus is not installed. HudClock will not run.", "no core: the line names the cause")
     eq(#W.connects, 0, "no core: no connect")
     eq(#W.loops, 0, "no core: no loop")
 end
 
-do -- Core installed: connect{ mod = "Clock", need = ">=0.9.0" }, and nothing logged before it answers.
+do -- Core installed: connect{ mod = "HudClock", need = ">=0.9.0" }, and nothing logged before it answers.
     boot()
     eq(#W.connects, 1, "connect called once")
     local c = W.connects[1]
-    ok(c.mod == "Clock" and c.need == ">=0.9.0", "connect{ mod = 'Clock', need = '>=0.9.0' } (core.settings)", tostring(c.mod) .. " " .. tostring(c.need))
+    ok(c.mod == "HudClock" and c.need == ">=0.9.0", "connect{ mod = 'HudClock', need = '>=0.9.0' } (core.settings)", tostring(c.mod) .. " " .. tostring(c.need))
     ok(type(c.onReady) == "function" and type(c.onFail) == "function", "connect gets onReady and onFail")
     eq(#W.printed, 0, "nothing printed during main.lua")
     -- onFail: connect has already logged its one line; the clock adds nothing (CAP-3).
-    c.onFail("Nucleus 0.1.0 is older than Clock needs (>=0.9.0). Update Nucleus.")
+    c.onFail("Nucleus 0.1.0 is older than HudClock needs (>=0.9.0). Update Nucleus.")
     eq(#W.printed, 0, "onFail adds no line")
     eq(#W.loops, 0, "onFail starts nothing")
 end
@@ -164,13 +164,13 @@ do -- updateEvery from core.settings, read in onReady; a problem is one WARN aft
     eq(#W.printed, 0, "nothing before connect")
     connect(newCore{ every = 7 })
     eq(W.gets, 1, "core.settings.get('updateEvery') once in onReady")
-    eq(#lines("^%[Clock%] READY updateEvery=7 element=clock%.time$"), 1, "READY shows the stored value")
+    eq(#lines("^%[HudClock%] READY updateEvery=7 element=clock%.time$"), 1, "READY shows the stored value")
     eq(#lines("WARN"), 0, "no WARN")
     eq(#W.watchers, 1, "one settings watcher")
     boot()
     connect(newCore{ getErr = "nucleus.settings.get: call-failed channel class not loaded" })
-    eq(#lines("^%[Clock%] WARN updateEvery could not be read from Nucleus's settings %(nucleus%.settings%.get: call%-failed"), 1, "get raises: one WARN")
-    ok(#lines("^%[Clock%] READY updateEvery=1 element=clock%.time$") == 1, "get raises: runs with updateEvery = 1")
+    eq(#lines("^%[HudClock%] WARN updateEvery could not be read from Nucleus's settings %(nucleus%.settings%.get: call%-failed"), 1, "get raises: one WARN")
+    ok(#lines("^%[HudClock%] READY updateEvery=1 element=clock%.time$") == 1, "get raises: runs with updateEvery = 1")
     boot()
     connect(newCore{ settings = false })
     ok(#lines("WARN updateEvery could not be read") == 1 and #lines("WARN could not watch Nucleus's settings") == 1 and #lines("READY updateEvery=1 ") == 1,
@@ -193,7 +193,7 @@ end
 do -- No UI helpers on the api: one ERROR line, no element, no loop.
     boot()
     connect(newCore{ ui = false })
-    eq(#lines("^%[Clock%] ERROR Nucleus's UI helpers are not available%. Clock will not run%.$"), 1, "no core.ui: one ERROR line")
+    eq(#lines("^%[HudClock%] ERROR Nucleus's UI helpers are not available%. HudClock will not run%.$"), 1, "no core.ui: one ERROR line")
     eq(#W.loops, 0, "no core.ui: no loop")
 end
 
@@ -223,7 +223,7 @@ do
     eq(W.loops[1].ms, 250, "the loop runs every 250 ms (clock story 5)")
     eq(W.async, 0, "never LoopAsync or ExecuteInGameThread")
     eq(#W.loadMapHooks, 1, "one LoadMap post-hook")
-    eq(#lines("^%[Clock%] READY updateEvery=1 element=clock%.time$"), 1, "READY logged")
+    eq(#lines("^%[HudClock%] READY updateEvery=1 element=clock%.time$"), 1, "READY logged")
 
     -- No sky (loading): stays hidden, no text set.
     local i = #U.calls
@@ -239,7 +239,7 @@ do
     tick()
     ok(U.calls[i + 1][1] == "set" and U.calls[i + 1][2] == "10:07", "first value: set('10:07') first", U.calls[i + 1] and (U.calls[i + 1][1] .. " " .. tostring(U.calls[i + 1][2])))
     ok(U.calls[i + 2][1] == "setVisible" and U.calls[i + 2][2] == true, "first value: then setVisible(true)")
-    eq(#lines("^%[Clock%] VISIBLE 10:07 %(updateEvery=1%)$"), 1, "VISIBLE line")
+    eq(#lines("^%[HudClock%] VISIBLE 10:07 %(updateEvery=1%)$"), 1, "VISIBLE line")
 
     -- Same minute: no set, setVisible(true) again (core makes that a no-op).
     i = #U.calls
@@ -261,7 +261,7 @@ do
     tick()
     local v = callsSince(U, i, "setVisible")
     ok(#v == 1 and v[1] == false, "sky gone: setVisible(false)")
-    eq(#lines("^%[Clock%] HIDDEN no sky$"), 1, "sky gone: one HIDDEN line")
+    eq(#lines("^%[HudClock%] HIDDEN no sky$"), 1, "sky gone: one HIDDEN line")
     tick(2)
     eq(#lines("HIDDEN"), 1, "still gone: no more HIDDEN lines")
     eq(#lines("WARN"), 0, "no sky is normal: no WARN")
@@ -286,7 +286,7 @@ do
     eq(W.finds, f0 + 1, "then by path again")
 
     -- The conversion is checked against the sky's function once per sky: one VERIFY line per match.
-    eq(#lines("^%[Clock%] VERIFY "), 3, "one VERIFY line per sky and per map change (two skies, one LoadMap)")
+    eq(#lines("^%[HudClock%] VERIFY "), 3, "one VERIFY line per sky and per map change (two skies, one LoadMap)")
 
     -- A read error (Time of Day gone after a patch): hidden, one WARN, however many ticks.
     W.sky["Time of Day"] = nil
@@ -448,7 +448,7 @@ do -- A watched change applies at the next tick (changeable "anytime"): one SETT
     W.watchers[1]("other.key", 3)
     eq(#lines("SETTING"), 0, "another key: ignored")
     W.watchers[1]("updateEvery", 5)
-    eq(#lines("^%[Clock%] SETTING updateEvery=5$"), 1, "SETTING line")
+    eq(#lines("^%[HudClock%] SETTING updateEvery=5$"), 1, "SETTING line")
     tick()
     local sets = callsSince(U, i, "set")
     ok(#sets == 1 and sets[1] == "10:05", "next tick shows the new rounding (10:07 -> 10:05)", sets[1])
@@ -470,8 +470,8 @@ do -- Debug lines: SHOW per change and a TICK cost line every 240 ticks (a minut
     connect(core)
     W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(9, 5))
     tick(240)
-    eq(#lines("^%[Clock%] DEBUG SHOW 09:05$"), 1, "debug: one SHOW line per shown value")
-    local cost = lines("^%[Clock%] DEBUG TICK n=240 avg [%d%.]+ max %d+ us %(read [%d%.]+, set [%d%.]+ over 1 changes, log [%d%.]+%)$")
+    eq(#lines("^%[HudClock%] DEBUG SHOW 09:05$"), 1, "debug: one SHOW line per shown value")
+    local cost = lines("^%[HudClock%] DEBUG TICK n=240 avg [%d%.]+ max %d+ us %(read [%d%.]+, set [%d%.]+ over 1 changes, log [%d%.]+%)$")
     eq(#cost, 1, "debug: one TICK cost line per 240 ticks")
     boot()
     connect(newCore())
@@ -482,7 +482,7 @@ do -- Debug lines: SHOW per change and a TICK cost line every 240 ticks (a minut
     connect(newCore())
     W.sky = newSky("/Game/Maps/X.X:PersistentLevel.Ultra_Dynamic_Sky_C_0", tod(9, 5))
     tick(240)
-    eq(#lines("^%[Clock%] TICK n=240 avg [%d%.]+ max %d+ us %(read 0%.0, set 0%.0 over 1 changes, log 0%.0%)$"), 1, "profile: one info TICK line, whole tick only")
+    eq(#lines("^%[HudClock%] TICK n=240 avg [%d%.]+ max %d+ us %(read 0%.0, set 0%.0 over 1 changes, log 0%.0%)$"), 1, "profile: one info TICK line, whole tick only")
     eq(#lines("DEBUG"), 0, "profile: no DEBUG lines")
     boot{ dev = "return { debug = true }" }
     connect(newCore{ clock = false })

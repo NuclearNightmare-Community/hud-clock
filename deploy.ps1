@@ -6,17 +6,17 @@
   mod.json version satisfies the clock's dependsOn (a minimum, not below the installed core's compat.floor;
   deploy-lib.ps1). -Force installs anyway, for the failure scenarios
   (the clock's own runtime check then has to catch it).
-  Installs ue4ss/Mods/Clock/{mod.json, Scripts/main.lua, Scripts/time.lua}. The clock's setting lives in
-  Mods/Clock/settings.json, the values file Nucleus's settings service keeps (Nucleus 0.9.0): -UpdateEvery writes it
+  Installs ue4ss/Mods/HudClock/{mod.json, Scripts/main.lua, Scripts/time.lua}. The clock's setting lives in
+  Mods/HudClock/settings.json, the values file Nucleus's settings service keeps (Nucleus 0.9.0): -UpdateEvery writes it
   ({"updateEvery":N}); without it an existing settings.json survives the redeploy untouched (it is the player's).
-  Writes "Clock : 1" into mods.txt right below Nucleus's line and above "Keybinds : 1", moving it there if it was
-  elsewhere. Never writes outside Mods/Clock, Mods/ClockDriver and those mods.txt lines, and never bundles any of
+  Writes "HudClock : 1" into mods.txt right below Nucleus's line and above "Keybinds : 1", moving it there if it was
+  elsewhere. Never writes outside Mods/HudClock, Mods/HudClockDriver and those mods.txt lines, and never bundles any of
   core's files.
-  -Test also installs the test driver (test/ClockDriver as Mods/ClockDriver, between Nucleus and Clock), writes the
+  -Test also installs the test driver (test/HudClockDriver as Mods/HudClockDriver, between Nucleus and HudClock), writes the
   scenario to its Scripts/scenario.txt, and writes Scripts/dev.lua (test only) to turn on the clock's DEBUG lines
   (debug = true), which check.ps1 reads (cost: only the TICK cost lines, profile = true). With -Test, step5 implies
   -UpdateEvery 5 and every other scenario -UpdateEvery 1, so a run never inherits an earlier run's value.
-  -Remove deletes Mods/Clock, Mods/ClockDriver and their mods.txt lines; nothing else changes (mods.txt keeps its
+  -Remove deletes Mods/HudClock, Mods/HudClockDriver and their mods.txt lines; nothing else changes (mods.txt keeps its
   bytes when it had no clock lines).
   -Staged: $Instance is the host-side staging folder of a VM run (run.ps1 -Target vm, tools/vm/vm-sp.ps1), not a game
   copy; only the running-game check is skipped (no game runs from it, and the host's game may be in use meanwhile).
@@ -121,7 +121,7 @@ elseif ($keptValues) { [IO.File]::WriteAllBytes($valuesFile, $keptValues) }
 # before the clock's main.lua).
 $add = @($name)
 if ($Test) {
-    Copy-Item (Join-Path $here 'test\ClockDriver') (Join-Path $modsDir $driver) -Recurse -Force
+    Copy-Item (Join-Path $here 'test\HudClockDriver') (Join-Path $modsDir $driver) -Recurse -Force
     foreach ($f in 'scenario.txt', 'request.txt', 'done.txt') { Remove-Item (Join-Path $modsDir "$driver\Scripts\$f") -ErrorAction SilentlyContinue }
     [IO.File]::WriteAllText((Join-Path $modsDir "$driver\Scripts\scenario.txt"), $Scenario)
     $add = @($driver, $name)

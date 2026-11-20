@@ -7,6 +7,6 @@ Scripts/dev.lua
 build/
 *.log
 # Written by a test run next to the driver (only ever in a game instance, but never commit a stray copy)
-test/ClockDriver/Scripts/scenario.txt
-test/ClockDriver/Scripts/request.txt
-test/ClockDriver/Scripts/done.txt
+test/HudClockDriver/Scripts/scenario.txt
+test/HudClockDriver/Scripts/request.txt
+test/HudClockDriver/Scripts/done.txt
