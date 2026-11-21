@@ -4,6 +4,8 @@ All notable changes to HUD Clock are recorded here. The format follows [Keep a C
 
 ## [0.3.0] - 2026-11-19
 
+- Catalog listing: the display name "HUD Clock", a description and categories.
+
 Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635. Needs Nucleus 0.9.0 or newer (`>=0.9.0`).
 
 For players: the mod is shown as "HUD Clock". The base pack's installer (`Install-NNMods`) moves an earlier install over to it, keeping your `settings.json` and whether the mod is on or off.
