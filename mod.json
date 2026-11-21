@@ -2,7 +2,7 @@
   "id": "nuclearnightmare-community.hud-clock",
   "name": "HudClock",
   "displayName": "HUD Clock",
-  "description": "Shows the in-game time in the HUD during a match.",
+  "description": "Shows the in-game time on your HUD during a map.",
   "categories": ["ui", "qol"],
   "version": "0.3.0",
   "scope": "client",
