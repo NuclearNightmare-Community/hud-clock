@@ -138,3 +138,7 @@ Afterwards `./check.ps1 -Instance $copy -Scenario hand` checks the log: connecte
 | `test/HudClockDriver/` | The test driver (never shipped) |
 | `test/unit/` | Unit tests |
 | `test/pair/hud-clock-scenarios.ps1` | The `clock-client` two-player scenario for the workspace's `tools/vm/pair.ps1` |
+
+## Feedback
+
+Bug reports, ideas and questions go to [NuclearNightmare-Community/feedback](https://github.com/NuclearNightmare-Community/feedback). For a security problem, please report it privately: see its [SECURITY.md](https://github.com/NuclearNightmare-Community/feedback/blob/main/SECURITY.md).
